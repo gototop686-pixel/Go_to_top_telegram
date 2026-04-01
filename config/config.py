@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     def async_database_url(self) -> str:
         # If it's a typical postgres:// url (from Render/Supabase), 
         # SQLAlchemy async engine requires postgresql+asyncpg://
-        url = self.database_url
+        url = self.database_url.strip() # Remove any accidental newlines/spaces
         if url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql+asyncpg://", 1)
         elif url.startswith("postgresql://") and "+asyncpg" not in url:
