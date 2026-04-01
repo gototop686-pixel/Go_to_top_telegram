@@ -4,8 +4,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from sqlalchemy.orm import DeclarativeBase
 from config.config import config
 
-# Create async engine
-engine = create_async_engine(config.async_database_url, echo=False)
+# Create async engine with keep-alive
+engine = create_async_engine(
+    config.async_database_url, 
+    echo=False,
+    pool_recycle=300, # Recycle connection every 5 minutes
+    pool_pre_ping=True # Check connection status before using
+)
 
 # Create session maker
 async_session = async_sessionmaker(engine, expire_on_commit=False)

@@ -47,7 +47,7 @@ from config.config import config
 class AIService:
     def __init__(self):
         self.client = genai.Client(api_key=config.gemini_api_key)
-        self.model_name = "gemini-2.0-flash"
+        self.model_name = "gemini-1.5-flash"
 
     async def get_answer(self, question: str, language: str = "ru") -> str:
         prompt = f"""
@@ -66,7 +66,7 @@ class AIService:
         """
         
         try:
-            # Wrap the synchronous library call in a thread to keep the bot responsive
+            # Wrap the synchronous library call in a thread
             response = await asyncio.to_thread(
                 self.client.models.generate_content,
                 model=self.model_name,
@@ -76,9 +76,12 @@ class AIService:
                     max_output_tokens=500
                 )
             )
+            if not response.text:
+                 raise ValueError("AI returned empty response")
             return response.text
         except Exception as e:
-            print(f"AI Error: {e}")
-            return "Извините, сейчас я не могу ответить на вопрос. Пожалуйста, обратитесь к менеджеру."
+            logging.error(f"AI ERROR: {str(e)}")
+            # In MVP/Debug mode, we return the error to the user for faster troubleshooting
+            return f"Ошибка ИИ: {str(e)}. Пожалуйста, убедитесь, что GEMINI_API_KEY верен."
 
 ai_service = AIService()
