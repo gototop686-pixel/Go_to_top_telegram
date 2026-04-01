@@ -49,9 +49,15 @@ class AIService:
     def __init__(self):
         try:
             self.client = genai.Client(api_key=config.gemini_api_key)
-            self.models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b"]
+            # 2026 standard flagship models
+            self.models_to_try = [
+                "gemini-3-flash", 
+                "gemini-2.5-flash", 
+                "gemini-2.0-flash", 
+                "gemini-1.5-flash"
+            ]
             self.model_name = self.models_to_try[0]
-            logging.info(f"AI Service initialized with models: {self.models_to_try}")
+            logging.info(f"AI Service initialized with latest models: {self.models_to_try}")
         except Exception as e:
             logging.error(f"Failed to initialize AI Service: {e}")
 
