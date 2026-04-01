@@ -18,7 +18,8 @@ async def start_questioning(message: Message, i18n, state: FSMContext):
 
 @router.message(SupportMode.asking_question)
 async def process_question(message: Message, i18n, language: str, state: FSMContext):
-    if message.text.startswith("🔙") or message.text.lower() == "назад":
+    # Match back button manually because it's a global need
+    if message.text in [i18n_manager.get("btn_back_to_menu", "ru"), i18n_manager.get("btn_back_to_menu", "am")]:
         await state.clear()
         await message.answer(i18n("main_menu"), reply_markup=get_main_menu_kb(i18n))
         return
@@ -29,12 +30,11 @@ async def process_question(message: Message, i18n, language: str, state: FSMCont
     # Log interaction
     await log_interaction(message.from_user.id, 'ai', 'questioning', message.text, answer)
 
-    # Answer + CTA (already in AI answer or appended here)
-    await message.answer(answer)
+    # Respond with AI answer and provide the "Back to Menu" button for the next question
+    await message.answer(answer, reply_markup=get_back_kb(i18n))
     
-    # Soft CTA: ask user if they want a calculation
-    await message.answer(i18n("fallback_question"), reply_markup=get_yes_no_kb(i18n))
-    await state.clear()
+    # NOTE: We do NOT clear the state here to allow a continuous dialogue.
+    # The user remains in SupportMode.asking_question.
 
 @router.message(F.text.in_([i18n_manager.get("btn_yes_calculation", "ru"), i18n_manager.get("btn_yes_calculation", "am")]))
 async def yes_to_calculation(message: Message, i18n, state: FSMContext):
