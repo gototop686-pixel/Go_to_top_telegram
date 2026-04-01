@@ -4,11 +4,11 @@ This is a production-ready Telegram bot for a Wildberries promotion service with
 
 ## 🚀 Key Features
 
-1.  **AI Q&A Support**: Answers user questions based on the service knowledge base using Google Gemini.
+1.  **AI Q&A Support**: Answers user questions based on the service knowledge base using Google Gemini (1.5-flash).
 2.  **Sales Funnel**: Structured data collection (Name, Article, Quantity) for calculations.
 3.  **Multilingual Support**: Supports Russian (🇷🇺) and Armenian (🇦🇲).
 4.  **Manager Integration**: Automatically hands off calculation requests and direct support requests to the manager.
-5.  **Analytics**: Tracks user interactions and funnel drop-off via SQLite.
+5.  **Persistence**: Uses SQLAlchemy with PostgreSQL (Supabase) for long-term data storage.
 
 ## ⚙️ Configuration
 
@@ -18,37 +18,41 @@ This is a production-ready Telegram bot for a Wildberries promotion service with
     BOT_TOKEN=your_telegram_bot_token
     MANAGER_ID=your_telegram_user_id
     GEMINI_API_KEY=your_google_gemini_api_key
+    DATABASE_URL=your_postgres_link
     ```
 3.  Install dependencies:
     ```bash
     pip install -r requirements.txt
     ```
 
-## 🛠️ Deployment on Render.com
+## 🛠️ Deployment on Render.com (Web Service)
 
-Render is a great free hosting choice for this lightweight bot.
+Render is the recommended choice. The bot is optimized to run as a **Web Service** (not Background Worker) to use the free tier effectively.
 
-1.  **GitHub Repo**: Push your code to a private GitHub repository.
-2.  **New Web Service**:
+1.  **New Web Service**:
     *   Connect your repository.
-    *   **Environment**: `Python3`.
+    *   **Runtime**: `Python 3`.
     *   **Build Command**: `pip install -r requirements.txt`.
     *   **Start Command**: `python bot.py`.
-3.  **Environment Variables**: Add your keys from the `.env` file to Render's Dashboard.
-4.  **Database (Supabase / PostgreSQL)**:
-    *   The bot uses **SQLAlchemy**, supporting both SQLite and PostgreSQL.
-    *   On Render's free tier, local SQLite data is lost on every deploy. 
-    *   **To use Supabase (recommended)**:
-        1. Get your **Direct Connection String** from Supabase (Settings -> Database).
-        2. Set the `DATABASE_URL` environment variable on Render:
-           `postgresql+asyncpg://user:password@host:port/dbname`
-        3. The bot will automatically switch to PostgreSQL and maintain your data persistently.
+2.  **Environment Variables**:
+    *   `BOT_TOKEN`: Your Telegram Bot Token.
+    *   `MANAGER_ID`: Your Telegram ID (to receive notifications).
+    *   `GEMINI_API_KEY`: Your Google Gemini API Key.
+    *   `DATABASE_URL`: Your Supabase/PostgreSQL connection string.
+3.  **Automatic DB Driver**: 
+    *   The bot automatically handles standard `postgres://` or `postgresql://` links. 
+    *   It will prepend `+asyncpg` for you, making it compatible with async SQLAlchemy.
+4.  **Health Checks**:
+    *   The bot starts a small HTTP server on the port provided by Render (captured via `$PORT`).
+    *   You can set the health check path to `/` in the Render dashboard.
+    *   **Anti-Sleep**: If the bot is on a free tier, it will sleep after 15 minutes of inactivity. Use a free service like [cron-job.org](https://cron-job.org) to ping your Render URL every 10-14 minutes to keep it "always-on".
 
 ## 🧠 Customizing Knowledge Base
 
-To update the information the AI uses to answer questions:
+To update what the AI knows:
 1. Open `services/ai_service.py`.
-2. Edit the `KNOWLEDGE_BASE` string with your website content or sales scripts.
+2. Edit the `KNOWLEDGE_BASE` string.
+3. Commit and push to GitHub. Render will redeploy automatically.
 
 ---
-Developed as a lightweight, scalable solution for Telegram lead generation.
+Developed for **Go to Top WB** - High-performance Telegram Sales & Support Bot.
