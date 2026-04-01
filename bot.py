@@ -5,7 +5,7 @@ import sys
 from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
-from aiogram.client.default import DefaultBotProperty
+from aiogram.client.default import DefaultBotProperties
 
 from config.config import config
 from database.models import init_db
@@ -22,7 +22,7 @@ async def main():
     # Initialize bot and dispatcher
     bot = Bot(
         token=config.bot_token,
-        default=DefaultBotProperty(parse_mode=ParseMode.HTML)
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
     dp = Dispatcher()
 
