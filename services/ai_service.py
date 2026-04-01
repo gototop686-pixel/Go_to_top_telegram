@@ -49,11 +49,9 @@ class AIService:
     def __init__(self):
         try:
             self.client = genai.Client(api_key=config.gemini_api_key)
-            self.model_name = "gemini-2.0-flash"
-            # Diagnostic: list models to logs once on startup
-            # Note: This is a synchronous call in __init__ which is fine for startup
-            available_models = [m.name for m in self.client.models.list()]
-            logging.info(f"Available Gemini Models: {available_models}")
+            self.models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b"]
+            self.model_name = self.models_to_try[0]
+            logging.info(f"AI Service initialized with models: {self.models_to_try}")
         except Exception as e:
             logging.error(f"Failed to initialize AI Service: {e}")
 
@@ -73,30 +71,45 @@ class AIService:
         - Использовать мягкий призыв к действию (CTA): предложить расчет.
         """
         
-        try:
-            # Add a strict timeout to prevent the bot from hanging on slow Render instances
-            response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    self.client.models.generate_content,
-                    model=self.model_name,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=0.3,
-                        max_output_tokens=300 # Reduced tokens to save memory/bandwidth
-                    )
-                ),
-                timeout=15.0 # 15 seconds timeout
-            )
-            
-            if not response.text:
-                 return "Извините, сейчас я не могу ответить. Пожалуйста, попробуйте позже."
-            return response.text
-            
-        except asyncio.TimeoutError:
-            logging.error("AI Request Timeout")
-            return "ИИ не ответил вовремя. Пожалуйста, задайте вопрос еще раз или обратитесь к менеджеру."
-        except Exception as e:
-            logging.error(f"AI ERROR: {str(e)}")
-            return "Произошла ошибка при обработке вопроса. Наш менеджер поможет вам."
+        for model in self.models_to_try:
+            try:
+                logging.info(f"Asking AI using model: {model}")
+                # Add a strict timeout
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.client.models.generate_content,
+                        model=model,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            temperature=0.3,
+                            max_output_tokens=300
+                        )
+                    ),
+                    timeout=15.0
+                )
+                
+                if response and response.text:
+                    # Successfully got response, update preferred model if it's different
+                    if self.model_name != model:
+                        self.model_name = model
+                    return response.text
+                
+            except (asyncio.TimeoutError, Exception) as e:
+                err_msg = str(e).upper()
+                if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+                    logging.warning(f"Model {model} exhausted (429). Trying next...")
+                    continue
+                elif "404" in err_msg or "NOT_FOUND" in err_msg:
+                    logging.warning(f"Model {model} not found (404). Trying next...")
+                    continue
+                else:
+                    logging.error(f"Unexpected AI Error with {model}: {e}")
+                    # Try next model anyway for stability
+                    continue
+        
+        # If all models failed
+        return "ИИ временно недоступен из-за ограничений квот. Пожалуйста, обратитесь к менеджеру."
+
+ai_service = AIService()
 
 ai_service = AIService()
