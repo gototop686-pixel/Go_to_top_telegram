@@ -1,4 +1,4 @@
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
@@ -16,7 +16,7 @@ async def start_questioning(message: Message, i18n, state: FSMContext):
     await message.answer(i18n("ask_question_prompt"), reply_markup=get_ai_support_kb(i18n))
 
 @router.message(SupportMode.asking_question)
-async def process_question(message: Message, i18n, language: str, state: FSMContext):
+async def process_question(message: Message, i18n, language: str, state: FSMContext, bot: Bot):
     # Match back button
     if message.text in [i18n_manager.get("btn_back_to_menu", "ru"), i18n_manager.get("btn_back_to_menu", "am")]:
         await state.clear()
@@ -32,7 +32,7 @@ async def process_question(message: Message, i18n, language: str, state: FSMCont
     if message.text in [i18n_manager.get("btn_contact_manager", "ru"), i18n_manager.get("btn_contact_manager", "am")]:
         await state.clear()
         from handlers.common import contact_manager
-        await contact_manager(message, i18n)
+        await contact_manager(message, i18n, bot)
         return
 
     # Trigger AI Mode
