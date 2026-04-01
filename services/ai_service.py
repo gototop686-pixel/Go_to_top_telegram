@@ -78,7 +78,7 @@ class AIService:
                         contents=prompt,
                         config=types.GenerateContentConfig(
                             temperature=0.3,
-                            max_output_tokens=400
+                            max_output_tokens=1000
                         )
                     ),
                     timeout=15.0

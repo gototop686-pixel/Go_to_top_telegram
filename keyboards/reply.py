@@ -16,13 +16,13 @@ def get_existing_client_kb(i18n: Callable) -> ReplyKeyboardMarkup:
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
-def get_back_kb(i18n: Callable) -> ReplyKeyboardMarkup:
-    kb = [[KeyboardButton(text=i18n("btn_back_to_menu"))]]
-    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
-
-def get_yes_no_kb(i18n: Callable) -> ReplyKeyboardMarkup:
+def get_ai_support_kb(i18n: Callable) -> ReplyKeyboardMarkup:
     kb = [
-        [KeyboardButton(text=i18n("btn_yes_calculation"))],
+        [KeyboardButton(text=i18n("btn_contact_manager"))],
         [KeyboardButton(text=i18n("btn_back_to_menu"))]
     ]
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
+
+def get_back_kb(i18n: Callable) -> ReplyKeyboardMarkup:
+    kb = [[KeyboardButton(text=i18n("btn_back_to_menu"))]]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
