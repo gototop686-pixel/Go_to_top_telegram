@@ -36,6 +36,14 @@ KNOWLEDGE_BASE = """
 Сайт: https://gototopwb.ru
 """
 
+import os
+import asyncio
+from google import genai
+from google.genai import types
+from config.config import config
+
+# ... (KNOWLEDGE_BASE content) ...
+
 class AIService:
     def __init__(self):
         self.client = genai.Client(api_key=config.gemini_api_key)
@@ -58,10 +66,9 @@ class AIService:
         """
         
         try:
-            # Note: Using synchronous client for simplicity in MVP, 
-            # ideally should use async if library supports it or run in executor.
-            # Currently google-genai 0.2.x provides mostly sync methods or specific async ones.
-            response = self.client.models.generate_content(
+            # Wrap the synchronous library call in a thread to keep the bot responsive
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
                 model=self.model_name,
                 contents=prompt,
                 config=types.GenerateContentConfig(
