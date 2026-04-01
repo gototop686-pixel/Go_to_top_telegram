@@ -18,6 +18,7 @@ def get_existing_client_kb(i18n: Callable) -> ReplyKeyboardMarkup:
 
 def get_ai_support_kb(i18n: Callable) -> ReplyKeyboardMarkup:
     kb = [
+        [KeyboardButton(text=i18n("btn_calc_on_site"))],
         [KeyboardButton(text=i18n("btn_contact_manager"))],
         [KeyboardButton(text=i18n("btn_back_to_menu"))]
     ]

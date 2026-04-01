@@ -23,6 +23,11 @@ async def process_question(message: Message, i18n, language: str, state: FSMCont
         await message.answer(i18n("main_menu"), reply_markup=get_main_menu_kb(i18n))
         return
         
+    # Match calculate on site button
+    if message.text in [i18n_manager.get("btn_calc_on_site", "ru"), i18n_manager.get("btn_calc_on_site", "am")]:
+        await message.answer(i18n("calc_on_site_msg"), reply_markup=get_ai_support_kb(i18n))
+        return
+
     # Match contact manager button
     if message.text in [i18n_manager.get("btn_contact_manager", "ru"), i18n_manager.get("btn_contact_manager", "am")]:
         await state.clear()
@@ -36,5 +41,5 @@ async def process_question(message: Message, i18n, language: str, state: FSMCont
     # Log interaction
     await log_interaction(message.from_user.id, 'ai', 'questioning', message.text, answer)
 
-    # Respond with AI answer and provide the specialized AI keyboard (Manager + Back)
+    # Respond with AI answer and provide the specialized AI keyboard (Manager + Calc + Back)
     await message.answer(answer, reply_markup=get_ai_support_kb(i18n))
