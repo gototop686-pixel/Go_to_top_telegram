@@ -52,9 +52,13 @@ async def main():
     logging.info(f"Starting web server on port {port}")
     await site.start()
 
-    # Start polling (clearing pending updates ensures no conflict on rapid restarts)
+    # CRITICAL: Delete any old webhook and clear pending updates to avoid Conflict Errors 
+    # when Render performs a rolling update (old instance still running).
+    await bot.delete_webhook(drop_pending_updates=True)
+
+    # Start polling
     # This call is blocking, it will keep the bot alive
-    await dp.start_polling(bot, skip_updates=True)
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     try:
