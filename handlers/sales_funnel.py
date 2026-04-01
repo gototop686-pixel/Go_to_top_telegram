@@ -33,45 +33,46 @@ async def process_article(message: Message, i18n, state: FSMContext):
     await state.set_state(SalesFunnel.waiting_for_box_qty)
     await message.answer(i18n("ask_box_qty"))
 
-@router.message(SalesFunnel.waiting_for_box_qty)
+@router.message(SalesFunnel.waiting_for_box_qty, F.text.isdigit())
 async def process_box_qty(message: Message, i18n, state: FSMContext):
+    qty = int(message.text)
+    await state.update_data(box_qty=qty)
+    await state.set_state(SalesFunnel.waiting_for_planned_qty)
+    await message.answer(i18n("ask_planned_qty"))
+
+@router.message(SalesFunnel.waiting_for_box_qty)
+async def invalid_box_qty(message: Message, i18n):
+    await message.answer(i18n("invalid_input"))
+
+@router.message(SalesFunnel.waiting_for_planned_qty, F.text.isdigit())
+async def process_planned_qty(message: Message, i18n, state: FSMContext, bot: Bot):
+    qty = int(message.text)
+    data = await state.get_data()
+    data['planned_qty'] = qty
+    
+    # Save to DB
+    await update_user_data(message.from_user.id, data)
+    await log_interaction(message.from_user.id, 'funnel', 'complete', message.text, i18n("calculation_started"))
+
+    # Notify user
+    await message.answer(i18n("calculation_started"), reply_markup=get_main_menu_kb(i18n))
+
+    # Handoff to manager
+    manager_msg = i18n("manager_notification", 
+                       name=data['name'], 
+                       article=data['article'], 
+                       box_qty=data['box_qty'], 
+                       planned_qty=data['planned_qty'],
+                       username=message.from_user.username or "N/A",
+                       user_id=message.from_user.id)
+    
     try:
-        qty = int(message.text)
-        await state.update_data(box_qty=qty)
-        await state.set_state(SalesFunnel.waiting_for_planned_qty)
-        await message.answer(i18n("ask_planned_qty"))
-    except ValueError:
-        await message.answer(i18n("invalid_input"))
+        await bot.send_message(config.manager_id, manager_msg)
+    except Exception as e:
+        print(f"Failed to notify manager: {e}")
+
+    await state.clear()
 
 @router.message(SalesFunnel.waiting_for_planned_qty)
-async def process_planned_qty(message: Message, i18n, state: FSMContext, bot: Bot):
-    try:
-        qty = int(message.text)
-        data = await state.get_data()
-        data['planned_qty'] = qty
-        
-        # Save to DB
-        await update_user_data(message.from_user.id, data)
-        await log_interaction(message.from_user.id, 'funnel', 'complete', message.text, i18n("calculation_started"))
-
-        # Notify user
-        await message.answer(i18n("calculation_started"), reply_markup=get_main_menu_kb(i18n))
-
-        # Handoff to manager
-        manager_msg = i18n("manager_notification", 
-                           name=data['name'], 
-                           article=data['article'], 
-                           box_qty=data['box_qty'], 
-                           planned_qty=data['planned_qty'],
-                           username=message.from_user.username or "N/A",
-                           user_id=message.from_user.id)
-        
-        try:
-            await bot.send_message(config.manager_id, manager_msg)
-        except Exception as e:
-            print(f"Failed to notify manager: {e}")
-
-        await state.clear()
-        
-    except ValueError:
-        await message.answer(i18n("invalid_input"))
+async def invalid_planned_qty(message: Message, i18n):
+    await message.answer(i18n("invalid_input"))

@@ -30,10 +30,10 @@ async def main():
     dp.message.middleware(I18nMiddleware())
     dp.callback_query.middleware(I18nMiddleware())
 
-    # Register routers
+    # Register routers (order matters!)
     dp.include_router(common.router)
-    dp.include_router(sales_funnel.router)
     dp.include_router(ai_support.router)
+    dp.include_router(sales_funnel.router)
 
     # Logging
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
