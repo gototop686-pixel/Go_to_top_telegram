@@ -7,9 +7,11 @@ from database.crud import update_user_data, log_interaction
 from keyboards.reply import get_main_menu_kb, get_back_kb
 from config.config import config
 
+from middlewares.i18n import i18n_manager
+
 router = Router()
 
-@router.message(lambda m, i18n: m.text == i18n("btn_new_client"))
+@router.message(F.text.in_([i18n_manager.get("btn_new_client", "ru"), i18n_manager.get("btn_new_client", "am")]))
 async def start_funnel(message: Message, i18n, state: FSMContext):
     await state.set_state(SalesFunnel.waiting_for_name)
     await message.answer(i18n("ask_name"), reply_markup=get_back_kb(i18n))
