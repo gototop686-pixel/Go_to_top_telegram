@@ -66,22 +66,29 @@ class AIService:
         """
         
         try:
-            # Wrap the synchronous library call in a thread
-            response = await asyncio.to_thread(
-                self.client.models.generate_content,
-                model=self.model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.3,
-                    max_output_tokens=500
-                )
+            # Add a strict timeout to prevent the bot from hanging on slow Render instances
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.client.models.generate_content,
+                    model=self.model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.3,
+                        max_output_tokens=300 # Reduced tokens to save memory/bandwidth
+                    )
+                ),
+                timeout=15.0 # 15 seconds timeout
             )
+            
             if not response.text:
-                 raise ValueError("AI returned empty response")
+                 return "Извините, сейчас я не могу ответить. Пожалуйста, попробуйте позже."
             return response.text
+            
+        except asyncio.TimeoutError:
+            logging.error("AI Request Timeout")
+            return "ИИ не ответил вовремя. Пожалуйста, задайте вопрос еще раз или обратитесь к менеджеру."
         except Exception as e:
             logging.error(f"AI ERROR: {str(e)}")
-            # In MVP/Debug mode, we return the error to the user for faster troubleshooting
-            return f"Ошибка ИИ: {str(e)}. Пожалуйста, убедитесь, что GEMINI_API_KEY верен."
+            return "Произошла ошибка при обработке вопроса. Наш менеджер поможет вам."
 
 ai_service = AIService()
