@@ -4,7 +4,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
 from database.crud import update_user_language, get_user
-from keywords.inline import get_language_kb
+from keyboards.inline import get_language_kb
 from keyboards.reply import get_main_menu_kb, get_existing_client_kb
 from config.config import config
 
