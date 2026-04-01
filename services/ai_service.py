@@ -47,8 +47,15 @@ from config.config import config
 
 class AIService:
     def __init__(self):
-        self.client = genai.Client(api_key=config.gemini_api_key)
-        self.model_name = "gemini-1.5-flash"
+        try:
+            self.client = genai.Client(api_key=config.gemini_api_key)
+            self.model_name = "gemini-2.0-flash"
+            # Diagnostic: list models to logs once on startup
+            # Note: This is a synchronous call in __init__ which is fine for startup
+            available_models = [m.name for m in self.client.models.list()]
+            logging.info(f"Available Gemini Models: {available_models}")
+        except Exception as e:
+            logging.error(f"Failed to initialize AI Service: {e}")
 
     async def get_answer(self, question: str, language: str = "ru") -> str:
         prompt = f"""
