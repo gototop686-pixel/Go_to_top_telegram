@@ -9,7 +9,7 @@ from keyboards.reply import get_main_menu_kb, get_back_kb, get_yes_no_kb
 
 router = Router()
 
-@router.message(F.text == F.apply(lambda text, i18n: i18n("btn_ask_question")))
+@router.message(lambda m, i18n: m.text == i18n("btn_ask_question"))
 async def start_questioning(message: Message, i18n, state: FSMContext):
     await state.set_state(SupportMode.asking_question)
     await message.answer(i18n("ask_question_prompt"), reply_markup=get_back_kb(i18n))
@@ -34,7 +34,7 @@ async def process_question(message: Message, i18n, language: str, state: FSMCont
     await message.answer(i18n("fallback_question"), reply_markup=get_yes_no_kb(i18n))
     await state.clear()
 
-@router.message(F.text == F.apply(lambda text, i18n: i18n("btn_yes_calculation")))
+@router.message(lambda m, i18n: m.text == i18n("btn_yes_calculation"))
 async def yes_to_calculation(message: Message, i18n, state: FSMContext):
     from handlers.sales_funnel import start_funnel
     await start_funnel(message, i18n, state)

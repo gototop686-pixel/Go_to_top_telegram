@@ -33,15 +33,15 @@ async def go_to_main_menu(message: Message, i18n, state: FSMContext):
     await state.clear()
     await message.answer(i18n("main_menu"), reply_markup=get_main_menu_kb(i18n))
 
-@router.message(F.text == F.apply(lambda text, i18n: i18n("btn_existing_client")))
+@router.message(lambda m, i18n: m.text == i18n("btn_existing_client"))
 async def existing_client_menu(message: Message, i18n):
     await message.answer(i18n("existing_client_menu"), reply_markup=get_existing_client_kb(i18n))
 
-@router.message(F.text == F.apply(lambda text, i18n: i18n("btn_check_status")))
+@router.message(lambda m, i18n: m.text == i18n("btn_check_status"))
 async def check_status(message: Message, i18n):
     await message.answer(i18n("status_stub"))
 
-@router.message(F.text == F.apply(lambda text, i18n: i18n("btn_contact_manager")))
+@router.message(lambda m, i18n: m.text == i18n("btn_contact_manager"))
 async def contact_manager(message: Message, i18n):
     # In a real app, this might notify the manager
     await message.answer(i18n("contact_manager_msg"))

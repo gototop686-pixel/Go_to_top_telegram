@@ -9,7 +9,7 @@ from config.config import config
 
 router = Router()
 
-@router.message(F.text == F.apply(lambda text, i18n: i18n("btn_new_client")))
+@router.message(lambda m, i18n: m.text == i18n("btn_new_client"))
 async def start_funnel(message: Message, i18n, state: FSMContext):
     await state.set_state(SalesFunnel.waiting_for_name)
     await message.answer(i18n("ask_name"), reply_markup=get_back_kb(i18n))
