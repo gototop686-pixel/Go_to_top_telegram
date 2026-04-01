@@ -38,6 +38,7 @@ KNOWLEDGE_BASE = """
 
 import os
 import asyncio
+import logging
 from google import genai
 from google.genai import types
 from config.config import config

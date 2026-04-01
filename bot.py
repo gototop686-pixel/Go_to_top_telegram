@@ -38,10 +38,7 @@ async def main():
     # Logging
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 
-    # Start polling in background
-    polling_task = asyncio.create_task(dp.start_polling(bot))
-
-    # Setup aiohttp web server for Render health checks
+    # Setup aiohttp web server for Render health checks (health check endpoint)
     app = web.Application()
     app.router.add_get("/", handle_ping)
     
@@ -55,8 +52,9 @@ async def main():
     logging.info(f"Starting web server on port {port}")
     await site.start()
 
-    # Wait for polling to finish (lifetime of bot)
-    await polling_task
+    # Start polling (clearing pending updates ensures no conflict on rapid restarts)
+    # This call is blocking, it will keep the bot alive
+    await dp.start_polling(bot, skip_updates=True)
 
 if __name__ == "__main__":
     try:
