@@ -21,6 +21,14 @@ async def cmd_start(message: Message, i18n, state: FSMContext):
     user = message.from_user
     await save_user(user.id, user.username, user.full_name)
     await message.answer(i18n("welcome_msg"), reply_markup=get_language_kb())
+    
+    # Notify manager
+    manager_msg = f"🆕 Пользователь зашел в бота!\n\nИмя: {user.full_name}\nUsername: @{user.username or 'N/A'}\nID: {user.id}"
+    try:
+        await message.bot.send_message(config.manager_id, manager_msg)
+    except Exception as e:
+        print(f"Failed to notify manager: {e}")
+        
     await log_interaction(user.id, 'command', 'start', '/start', 'Welcome message')
 
 @router.message(F.text == "🇷🇺 Русский")
