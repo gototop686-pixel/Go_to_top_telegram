@@ -4,6 +4,8 @@ class Settings(BaseSettings):
     bot_token: str
     manager_id: int
     groq_api_key: str
+    work_start_hour: int = 9
+    work_end_hour: int = 19
     database_url: str = "sqlite+aiosqlite:///bot_database.db"
 
     @property

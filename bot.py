@@ -10,7 +10,7 @@ from aiogram.client.default import DefaultBotProperties
 from config.config import config
 from database.models import init_db
 from middlewares.i18n import I18nMiddleware
-from handlers import common, ai_support, sales_funnel
+from handlers import common, ai_support, sales_funnel, manager
 
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
@@ -31,6 +31,7 @@ async def main():
     dp.callback_query.middleware(I18nMiddleware())
 
     # Register routers (order matters!)
+    dp.include_router(manager.router)
     dp.include_router(common.router)
     dp.include_router(ai_support.router)
     dp.include_router(sales_funnel.router)

@@ -8,3 +8,6 @@ class SalesFunnel(StatesGroup):
 
 class SupportMode(StatesGroup):
     asking_question = State()
+
+class ManagerChat(StatesGroup):
+    in_chat = State()

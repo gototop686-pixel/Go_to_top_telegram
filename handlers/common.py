@@ -53,14 +53,32 @@ async def existing_client_menu(message: Message, i18n):
 async def check_status(message: Message, i18n):
     await message.answer(i18n("status_stub"))
 
+from datetime import datetime, timedelta, timezone
+from keyboards.inline import get_language_kb, get_manager_accept_kb
+
+# ... (other imports) ...
+
 @router.message(F.text.in_([i18n_manager.get("btn_contact_manager", "ru"), i18n_manager.get("btn_contact_manager", "am")]))
 async def contact_manager(message: Message, i18n, bot: Bot):
-    # Notify manager about contact request
-    user = message.from_user
-    msg = f"🙋 Пользователь просит связаться!\n\nИмя: {user.full_name}\nUsername: @{user.username or 'N/A'}\nID: {user.id}"
-    try:
-        await bot.send_message(config.manager_id, msg)
-    except Exception as e:
-        print(f"Failed to notify manager on contact request: {e}")
-        
-    await message.answer(i18n("contact_manager_msg"))
+    # Erevan Time (UTC+4)
+    now_erevan = datetime.now(timezone.utc) + timedelta(hours=4)
+    current_hour = now_erevan.hour
+    
+    # Check working hours
+    if config.work_start_hour <= current_hour < config.work_end_hour:
+        # Notify manager about contact request with ACTION button
+        user = message.from_user
+        msg = f"🙋 Пользователь просит связаться!\n\nИмя: {user.full_name}\nUsername: @{user.username or 'N/A'}\nID: {user.id}"
+        try:
+            await bot.send_message(
+                config.manager_id, 
+                msg, 
+                reply_markup=get_manager_accept_kb(user.id)
+            )
+        except Exception as e:
+            print(f"Failed to notify manager: {e}")
+            
+        await message.answer(i18n("contact_manager_msg"))
+    else:
+        # Off-duty
+        await message.answer(i18n("off_duty_msg"))
