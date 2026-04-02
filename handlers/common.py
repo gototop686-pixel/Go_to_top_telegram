@@ -66,6 +66,10 @@ async def contact_manager(message: Message, i18n, bot: Bot):
     
     # Check working hours
     if config.work_start_hour <= current_hour < config.work_end_hour:
+        # Notify user (Wait message)
+        wait_msg = i18n("wait_for_manager_msg")
+        await message.answer(wait_msg)
+        
         # Notify manager about contact request with ACTION button
         user = message.from_user
         msg = f"🙋 Пользователь просит связаться!\n\nИмя: {user.full_name}\nUsername: @{user.username or 'N/A'}\nID: {user.id}"
