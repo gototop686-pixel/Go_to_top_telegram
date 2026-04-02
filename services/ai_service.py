@@ -34,14 +34,14 @@ KNOWLEDGE_BASE_AM = """
 class AIService:
     def __init__(self):
         try:
-            # GROK (xAI) Integration via OpenAI-compatible SDK
             self.client = AsyncOpenAI(
                 api_key=config.grok_api_key,
                 base_url="https://api.x.ai/v1"
             )
-            # 2026 Standard for xAI Grok
-            self.model_name = "grok-beta" 
-            logging.info(f"AI Service (Grok) initialized successfully.")
+            # Try flagship models in order of performance
+            self.models_to_try = ["grok-2", "grok-beta", "grok-1"]
+            self.model_name = self.models_to_try[0]
+            logging.info(f"AI Service (Grok) initialized. Priority models: {self.models_to_try}")
         except Exception as e:
             logging.error(f"Failed to initialize Grok AI: {e}")
 
@@ -49,9 +49,8 @@ class AIService:
         kb = KNOWLEDGE_BASE_RU if language == "ru" else KNOWLEDGE_BASE_AM
         
         system_prompt = f"""
-        Ты — элитный эксперт и бизнес-консультант компании GO TO TOP (Wildberries promotion). 
-        Твое общение должно быть на высочайшем профессиональном уровне, теплым и деловым. 
-        Ты — Grok, мощная инженерная мысль от xAI, теперь на службе GO TO TOP.
+        Ты — высококвалифицированный эксперт по продажам компании GO TO TOP (Wildberries promotion).
+        Твое общение должно быть максимально профессиональным, теплым и соответствовать официальным скриптам продаж.
 
         Язык общения: {language if language != 'am' else 'Հայերեն (Armenian)'}.
 
@@ -68,23 +67,32 @@ class AIService:
         Вопрос пользователя: {question}
         """
         
-        try:
-            logging.info(f"Asking Grok...")
-            response = await self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": "You are a professional business consultant for GO TO TOP (Wildberries Promotion)."},
-                    {"role": "user", "content": system_prompt}
-                ],
-                temperature=0.4,
-                max_tokens=1500
-            )
-            
-            if response and response.choices:
-                return response.choices[0].message.content
+        for model in self.models_to_try:
+            try:
+                logging.info(f"Asking Grok using {model}...")
+                response = await self.client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "You are a professional business consultant for GO TO TOP (Wildberries Promotion)."},
+                        {"role": "user", "content": system_prompt}
+                    ],
+                    temperature=0.4,
+                    max_tokens=1500
+                )
                 
-        except Exception as e:
-            logging.error(f"Grok API Error: {e}")
-            return "Извините, система Grok временно недоступна. Пожалуйста, обратитесь к менеджеру."
+                if response and response.choices:
+                    if self.model_name != model:
+                        self.model_name = model
+                    return response.choices[0].message.content
+                    
+            except Exception as e:
+                err_text = str(e)
+                logging.warning(f"Model {model} failed: {err_text}")
+                if "400" in err_text or "404" in err_text or "429" in err_text or "not found" in err_text.lower():
+                    continue
+                else:
+                    continue
+        
+        return "Извините, система Grok временно недоступна. Пожалуйста, обратитесь к менеджеру напрямую."
 
 ai_service = AIService()
