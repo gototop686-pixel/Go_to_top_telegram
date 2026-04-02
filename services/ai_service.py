@@ -5,7 +5,6 @@ from openai import AsyncOpenAI
 from config.config import config
 
 # SYSTEM PROMPT FOR "LIYA" - THE AI AGENT OF GO TO TOP WB (v4 Final)
-# We use placeholders to keep it dynamic and synced with environment variables
 SYSTEM_PROMPT = """
 # СИСТЕМНЫЙ ПРОМПТ — AI-АССИСТЕНТ ЛИЯ | GO TO TOP WB
 
@@ -60,7 +59,7 @@ WhatsApp: +37455226224
 - Крупногабарит (свыше 3 кг или сторона > 55 см) — 2 500 ֏
 - Свыше 10 кг — индивидуально
 
-Минимум 20 выкупов. Цена по общему объёму (50 шт. = все по 1 500 ֏).
+Минимум 20 выкупов. Цена по общеу объёму (50 шт. = все по 1 500 ֏).
 
 Отзывы:
 - Оценка — 300 ֏
@@ -329,7 +328,7 @@ WhatsApp: +37455226224
 
 Менеджеру (ID: {manager_id}):
 🆕 НОВАЯ ЗАЯВКА
-👤 Имя / 📱 Telegram / 🎯 Артикул / 📐 Размеры / 📦 Короб / 🛒 Выкупов / ⭐ Отзывов / 🔑 Кլյուչ / 💰 Бюджет / 📸 Доп. услуги / 🏷️ Промокод / 💬 Комментарий / 🕐 Дата
+👤 Имя / 📱 Telegram / 🎯 Артикул / 📐 Размеры / 📦 Короб / 🛒 Выкупов / ⭐ Отзывов / 🔑 Ключи / 💰 Бюджет / 📸 Доп. услуги / 🏷️ Промокод / 💬 Комментарий / 🕐 Дата
 
 Если менеджер не ответил 5 мин → второму менеджеру.
 
@@ -352,7 +351,7 @@ WhatsApp: +37455226224
 
 Если клиент хочет новый заказ → переходим к сбору данных (сценарий 3).
 
-Если клиент хочет допвыкупы → уточнить объём, ключевые слова. Передать менеджеру.
+Если client хочет допвыкупы → уточнить объём, ключевые слова. Передать менеджеру.
 
 Если у клиента проблема (задержка, ошибка в ТЗ, вопрос по складу) → выслушать, зафиксировать, передать менеджеру: «Передала ваш запрос менеджеру. Он разберётся и свяжется с вами».
 
@@ -455,53 +454,58 @@ WhatsApp: +37455226224
 
 class AIService:
     def __init__(self):
-        try:
-            self.client = AsyncOpenAI(
-                api_key=config.groq_api_key,
-                base_url="https://api.groq.com/openai/v1"
-            )
-            # Flagship models to try sequentially if quota is hit
-            self.models_to_try = [
-                "llama-3.3-70b-versatile",
-                "llama3-70b-8192", 
-                "llama-3.3-70b-specdec",
-                "llama-3.1-8b-instant",
-                "mixtral-8x7b-32768"
-            ]
-            logging.info(f"AI Service (Liya) initialized successfully.")
-        except Exception as e:
-            logging.error(f"Failed to initialize Groq AI: {e}")
+        # We initialize multiple clients for rotation
+        self.keys = config.groq_keys
+        self.clients = [
+            AsyncOpenAI(api_key=k, base_url="https://api.groq.com/openai/v1")
+            for k in self.keys
+        ]
+        
+        # Primary models that are currently stable on Groq
+        self.models_to_try = [
+            "llama-3.3-70b-versatile",
+            "llama-3.1-405b-reasoning", # If user wants best quality
+            "llama-3.1-8b-instant",
+            "gemma2-9b-it" 
+        ]
+        
+        logging.info(f"AI Service (Liya) initialized with {len(self.keys)} API keys.")
 
     async def get_answer(self, question: str, language: str = "ru") -> str:
         lang_str = "Русский (Russian)" if language == "ru" else "Հայերեն (Armenian)"
-        
-        # Format prompt with current manager ID
         formatted_prompt = SYSTEM_PROMPT.replace("{manager_id}", str(config.manager_id))
         
-        for model in self.models_to_try:
-            try:
-                logging.info(f"Trying Liya with {model} in {lang_str}...")
-                response = await self.client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": formatted_prompt + f"\n\nТЕКУЩИЙ ЯЗЫК ОБЩЕНИЯ: {lang_str}"},
-                        {"role": "user", "content": question}
-                    ],
-                    temperature=0.5,
-                    max_tokens=1500
-                )
-                
-                if response and response.choices:
-                    return response.choices[0].message.content
+        # Rotation through KEYS
+        for i, client in enumerate(self.clients):
+            # Try MODELS for each key
+            for model in self.models_to_try:
+                try:
+                    logging.info(f"Trying Liya (Key {i+1}/{len(self.keys)}) with {model} in {lang_str}...")
+                    response = await client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": formatted_prompt + f"\n\nТЕКУЩИЙ ЯЗЫК ОБЩЕНИЯ: {lang_str}"},
+                            {"role": "user", "content": question}
+                        ],
+                        temperature=0.5,
+                        max_tokens=1500
+                    )
                     
-            except Exception as e:
-                if "429" in str(e):
-                    logging.warning(f"Model {model} hit quota. Trying fallback...")
-                    continue
-                else:
-                    logging.error(f"Error with model {model}: {e}")
-                    continue
-                    
-        return "Извините, я временно исчерпала лимит сообщений на сегодня. Пожалуйста, напишите нашему менеджеру — он ответит на все ваши вопросы лично! 👱‍♀️"
+                    if response and response.choices:
+                        return response.choices[0].message.content
+                        
+                except Exception as e:
+                    msg = str(e).lower()
+                    if "429" in msg or "413" in msg:
+                        logging.warning(f"Key {i+1} or Model {model} hit quota/limit. Moving next.")
+                        break # Try next key for faster resolution
+                    elif "400" in msg and "decommissioned" in msg:
+                        logging.warning(f"Model {model} is decommissioned. Skipping.")
+                        continue # Try next model
+                    else:
+                        logging.error(f"Error on Key {i+1}, Model {model}: {e}")
+                        continue
+                        
+        return "Извините, я временно исчерпала лимиты всех доступных токенов на сегодня. Пожалуйста, обратитесь к менеджеру напрямую через кнопку ниже. 👱‍♀️"
 
 ai_service = AIService()
