@@ -4,12 +4,13 @@ from aiogram.fsm.context import FSMContext
 from config.config import config
 from states.user_states import ManagerChat
 from keyboards.reply import get_main_menu_kb
+from aiogram.fsm.storage.base import StorageKey
 
 router = Router()
 
 def get_manager_chat_kb() -> ReplyKeyboardMarkup:
     kb = [[KeyboardButton(text="❌ Завершить диалог")]]
-    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, one_time_keyboard=False)
 
 @router.callback_query(F.data.startswith("accept_chat:"))
 async def accept_chat_handler(callback: CallbackQuery, state: FSMContext, bot: Bot):
@@ -19,18 +20,20 @@ async def accept_chat_handler(callback: CallbackQuery, state: FSMContext, bot: B
     await state.set_state(ManagerChat.in_chat)
     await state.update_data(active_user_id=user_id)
     
-    # Set user state globally so their messages are intercepted
-    # We use the same storage key as the user
-    from aiogram.fsm.storage.base import StorageKey
+    # Set user state globally
     user_state_key = StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id)
-    await callback.message.bot.get_context(user_state_key).set_state(ManagerChat.in_chat)
+    await bot.get_context(user_state_key).set_state(ManagerChat.in_chat)
     
-    await callback.message.edit_text(f"✅ Вы вошли в чат с пользователем {user_id}. Теперь ваши сообщения будут отправляться ему.")
-    await callback.message.answer("Режим чата активен. Чтобы выйти, нажмите кнопку ниже.", reply_markup=get_manager_chat_kb())
+    await callback.message.edit_text(f"✅ Чат с пользователем {user_id} активен.")
+    await callback.message.answer(
+        "📝 Теперь ваши сообщения отправляются клиенту.\n\n"
+        "Чтобы выйти, используйте кнопку «❌ Завершить диалог» ниже.", 
+        reply_markup=get_manager_chat_kb()
+    )
     
     # Notify user
     try:
-        await bot.send_message(user_id, "Менеджер подключился к чату! 🙋‍♂️ Вы можете писать свои сообщения здесь.")
+        await bot.send_message(user_id, "Лия (Менеджер) подключилась к чату! 👱‍♀️ Чем могу вам помочь?")
     except Exception:
         pass
     
@@ -38,23 +41,28 @@ async def accept_chat_handler(callback: CallbackQuery, state: FSMContext, bot: B
 
 @router.message(ManagerChat.in_chat)
 async def forward_chat_message(message: Message, state: FSMContext, bot: Bot):
-    # Check if this is the manager
+    data = await state.get_data()
+    active_user_id = data.get("active_user_id")
+    
+    # MANAGER -> USER
     if message.from_user.id == config.manager_id:
         if message.text == "❌ Завершить диалог":
             await end_chat_handler(message, state, bot)
             return
             
-        data = await state.get_data()
-        user_id = data.get("active_user_id")
-        if user_id:
+        if active_user_id:
             try:
-                await bot.send_message(user_id, f"👨‍💼 Менеджер: {message.text}")
+                # User's prefix
+                prefix = "👱‍♀️ Лия (Менеджер):"
+                await bot.send_message(active_user_id, f"{prefix} {message.text}")
             except Exception as e:
-                await message.answer(f"Ошибка при отправке: {e}")
+                await message.answer(f"Ошибка при пересылке клиенту: {e}")
+    
+    # USER -> MANAGER
     else:
-        # This is a message FROM a USER to the manager
+        # If this is the user who is being helped
         from_user = message.from_user
-        msg_to_manager = f"📩 Сообщение от {from_user.full_name} (@{from_user.username}):\n\n{message.text}"
+        msg_to_manager = f"📩 Клиент {from_user.full_name} (@{from_user.username}):\n\n{message.text}"
         try:
             await bot.send_message(config.manager_id, msg_to_manager)
         except Exception:
@@ -64,20 +72,18 @@ async def end_chat_handler(message: Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
     user_id = data.get("active_user_id")
     
-    # Manager's state
+    # Manager side
     await state.clear()
-    await message.answer("Диалог завершен. Вы вернулись в обычный режим.", reply_markup=get_main_menu_kb(lambda x: x))
+    # Provide a simple keyboard to the manager to return to normal bot mode
+    # Assuming manager uses RU
+    await message.answer("Диалог завершен. Вы вернулись в режим управления ботом.", reply_markup=get_main_menu_kb(lambda x: x))
     
-    # User's state
+    # User side
     if user_id:
-        from aiogram.fsm.storage.base import StorageKey
         user_state_key = StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id)
-        await message.bot.get_context(user_state_key).clear()
+        await bot.get_context(user_state_key).clear()
         
         try:
-            await bot.send_message(user_id, "Менеджер завершил диалог. Бот снова в автоматическом режиме! 🤖")
+            await bot.send_message(user_id, "Менеджер Лия завершила диалог. Я снова в автоматическом режиме! 🤖")
         except Exception:
             pass
-
-# IMPORTANT: We also need to intercept USER messages if they are in ManagerChat.in_chat
-# This would normally be in a separate logic or shared.

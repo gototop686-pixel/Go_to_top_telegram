@@ -78,7 +78,6 @@ async def contact_manager(message: Message, i18n, bot: Bot):
         except Exception as e:
             print(f"Failed to notify manager: {e}")
             
-        await message.answer(i18n("contact_manager_msg"))
     else:
         # Off-duty
         await message.answer(i18n("off_duty_msg"))
