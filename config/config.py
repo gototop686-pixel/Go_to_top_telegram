@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     bot_token: str
-    manager_id: int = 8224677283
+    manager_id: int
     groq_api_key: str
     work_start_hour: int = 9
     work_end_hour: int = 19
