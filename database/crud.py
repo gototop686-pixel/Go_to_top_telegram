@@ -1,5 +1,4 @@
 from sqlalchemy import select, update, insert
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, Dict
 
@@ -20,9 +19,22 @@ async def get_user(user_id: int) -> Optional[Dict]:
             }
         return None
 
+async def save_user(user_id: int, username: Optional[str] = None, full_name: Optional[str] = None):
+    """Saves or updates basic user info on /start."""
+    async with async_session() as session:
+        result = await session.execute(select(User).where(User.user_id == user_id))
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            user = User(user_id=user_id, name=full_name)
+            session.add(user)
+        else:
+            user.name = full_name
+            
+        await session.commit()
+
 async def create_user(user_id: int, language: str = 'ru'):
     async with async_session() as session:
-        # Check if user exists first to mimic INSERT OR IGNORE behavior
         result = await session.execute(select(User).where(User.user_id == user_id))
         if not result.scalar_one_or_none():
             new_user = User(user_id=user_id, language=language)

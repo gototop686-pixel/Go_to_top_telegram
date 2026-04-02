@@ -1,6 +1,6 @@
 from datetime import datetime
 import pytz
-from aiogram import Router, types, Bot
+from aiogram import Router, types, Bot, F
 from aiogram.types import Message
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
