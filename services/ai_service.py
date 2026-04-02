@@ -34,16 +34,21 @@ KNOWLEDGE_BASE_AM = """
 class AIService:
     def __init__(self):
         try:
+            # GROQ (Groq Cloud) Integration - using standard gsk_ key prefix
             self.client = AsyncOpenAI(
-                api_key=config.grok_api_key,
-                base_url="https://api.x.ai/v1"
+                api_key=config.grok_api_key, # Keeping var name for dashboard stability
+                base_url="https://api.groq.com/openai/v1"
             )
-            # Try flagship models in order of performance
-            self.models_to_try = ["grok-2", "grok-beta", "grok-1"]
+            # Flagship fast models for Groq (2026 lineup)
+            self.models_to_try = [
+                "llama-3.1-70b-versatile",
+                "llama3-70b-8192", 
+                "mixtral-8x7b-32768"
+            ]
             self.model_name = self.models_to_try[0]
-            logging.info(f"AI Service (Grok) initialized. Priority models: {self.models_to_try}")
+            logging.info(f"AI Service (Groq) initialized. Priority models: {self.models_to_try}")
         except Exception as e:
-            logging.error(f"Failed to initialize Grok AI: {e}")
+            logging.error(f"Failed to initialize Groq AI: {e}")
 
     async def get_answer(self, question: str, language: str = "ru") -> str:
         kb = KNOWLEDGE_BASE_RU if language == "ru" else KNOWLEDGE_BASE_AM
@@ -69,7 +74,7 @@ class AIService:
         
         for model in self.models_to_try:
             try:
-                logging.info(f"Asking Grok using {model}...")
+                logging.info(f"Asking Groq using {model}...")
                 response = await self.client.chat.completions.create(
                     model=model,
                     messages=[
@@ -88,11 +93,9 @@ class AIService:
             except Exception as e:
                 err_text = str(e)
                 logging.warning(f"Model {model} failed: {err_text}")
-                if "400" in err_text or "404" in err_text or "429" in err_text or "not found" in err_text.lower():
-                    continue
-                else:
-                    continue
+                # Try next model for stability
+                continue
         
-        return "Извините, система Grok временно недоступна. Пожалуйста, обратитесь к менеджеру напрямую."
+        return "Извините, система ИИ временно недоступна. Пожалуйста, обратитесь к менеджеру напрямую."
 
 ai_service = AIService()
