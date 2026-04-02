@@ -19,11 +19,81 @@ router = Router()
 
 
 # ============================================================
-# FORM DETECTION & SPLITTING
+# HARDCODED FORM — bot sends this, NOT the AI
 # ============================================================
 
-# Marker AI can put in response to trigger form
-FORM_MARKER = "[SEND_FORM]"
+FORM_TEMPLATE = (
+    "Имя:\n"
+    "Артикул WB:\n"
+    "Цена товара на WB (которую видит покупатель):\n"
+    "Количество выкупов (мин. 20):\n"
+    "Ключевые слова:\n"
+    "Размеры товара с упаковкой (ДxШxВ):\n"
+    "Сколько штук помещается в короб 60x40x40:\n"
+    "Количество отзывов (если нужны):\n"
+    "Доп. услуги (фото, видео, переупаковка):\n"
+    "Промокод (если есть):"
+)
+
+FORM_INTRO = "Для расчёта заполните форму ниже 📋\nНажмите на блок, чтобы скопировать, заполните и отправьте одним сообщением:"
+
+FORM_OUTRO = "☝️ Нажмите на текст выше — он скопируется. Заполните напротив каждого пункта и отправьте мне одним сообщением."
+
+
+# ============================================================
+# FORM DETECTION
+# ============================================================
+
+# Words that indicate AI wants to send the form
+FORM_TRIGGER_WORDS = [
+    "скопируйте", "заполните форму", "заполните эту форму",
+    "заполните, пожалуйста", "форму для заполнения",
+    "нужно от вас", "нужна следующая информация",
+    "мне нужны от вас", "отправьте одним сообщением",
+    "[SEND_FORM]",
+]
+
+# Form field indicators in AI response
+FORM_FIELD_WORDS = ["Имя:", "Артикул", "Ключевые слова:", "Количество выкупов"]
+
+
+def ai_wants_form(text: str) -> bool:
+    """Check if AI response is trying to send a data collection form."""
+    text_lower = text.lower()
+    # Check trigger phrases
+    for trigger in FORM_TRIGGER_WORDS:
+        if trigger.lower() in text_lower:
+            return True
+    # Check if response contains 3+ form field names
+    count = sum(1 for w in FORM_FIELD_WORDS if w in text)
+    return count >= 3
+
+
+def strip_form_from_ai(text: str) -> str:
+    """Remove form-like content from AI response, keep only the intro part."""
+    text = text.replace("[SEND_FORM]", "").strip()
+    lines = text.split("\n")
+    clean_lines = []
+    in_form = False
+    for line in lines:
+        stripped = line.strip()
+        # Detect start of form fields
+        if re.match(r'^[👤🎯💰🛒🔑📐📦⭐📸🏷️📊📋\s]*(?:Имя|Артикул|Цена товара|Количество выкупов|Ключевые слова|Размеры|Сколько штук|Количество отзывов|Доп\.|Промокод)', stripped):
+            in_form = True
+            continue
+        if in_form and (not stripped or re.match(r'^[👤🎯💰🛒🔑📐📦⭐📸🏷️📊📋\-\s]', stripped)):
+            continue
+        if in_form and stripped:
+            in_form = False
+        # Skip "скопируйте" / "нажмите" instructions (AI's version)
+        if any(w in stripped.lower() for w in ["скопируйте", "нажмите на блок", "отправьте одним сообщением"]):
+            continue
+        clean_lines.append(line)
+    result = "\n".join(clean_lines).strip()
+    # If nothing left, return a generic intro
+    if not result or len(result) < 10:
+        return FORM_INTRO
+    return result
 
 
 def extract_lead_data(response: str):
@@ -39,54 +109,56 @@ def extract_lead_data(response: str):
     return response, None
 
 
-def has_form_template(text: str) -> bool:
-    """Check if AI response contains a data collection form."""
-    indicators = ["Имя:", "Артикул", "Ключевые слова:", "Количество выкупов"]
-    count = sum(1 for ind in indicators if ind in text)
-    return count >= 3 or FORM_MARKER in text
+# ============================================================
+# FILLED FORM DETECTION (client sends back data)
+# ============================================================
+
+FIELD_PATTERNS = {
+    "name":          [r"имя", r"name"],
+    "article":       [r"артикул", r"article"],
+    "wb_price":      [r"цена", r"price", r"стоимость"],
+    "buyout_count":  [r"выкуп", r"количество выкупов", r"buyout"],
+    "keywords":      [r"ключев", r"keyword", r"запрос"],
+    "dimensions":    [r"размер", r"дxшxв", r"dimension"],
+    "box_capacity":  [r"короб", r"штук.*короб", r"box"],
+    "review_count":  [r"отзыв", r"review"],
+    "extra_services":[r"доп", r"услуг", r"фото", r"видео"],
+    "promo_code":    [r"промо", r"promo", r"скидк"],
+}
 
 
-def split_form_response(text: str):
-    """Split AI response into (intro, form_block, outro).
-    If no form detected, returns (text, None, None)."""
-    text = text.replace(FORM_MARKER, "").strip()
+def detect_filled_form(text: str) -> dict | None:
+    """Detect if client sent a filled form. Returns parsed fields or None."""
+    lines = text.strip().split("\n")
+    fields = {}
 
-    if not has_form_template(text):
-        return text, None, None
-
-    lines = text.split("\n")
-    form_start = None
-    form_end = None
-
-    # Find form boundaries: lines that look like "Имя:", "Артикул WB:", etc.
-    form_field_pattern = re.compile(
-        r'^[👤🎯💰🛒🔑📐📦⭐📸🏷️📊📋\s]*'
-        r'(Имя|Артикул|Цена товара|Количество выкупов|Ключевые слова|Размеры|Сколько штук|'
-        r'Количество отзывов|Доп\.?\s*услуги|Промокод|Անուն|Հոադdelays)'
-    )
-
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if not stripped:
+    for line in lines:
+        if ":" not in line:
             continue
-        if form_field_pattern.match(stripped):
-            if form_start is None:
-                form_start = i
-            form_end = i
+        key_part, _, val_part = line.partition(":")
+        # Clean key: remove emojis and extra spaces
+        key_clean = re.sub(r'[^\w\s]', '', key_part, flags=re.UNICODE).strip().lower()
+        val_clean = val_part.strip()
 
-    if form_start is not None and form_end is not None:
-        intro = "\n".join(lines[:form_start]).strip()
-        form = "\n".join(lines[form_start:form_end + 1]).strip()
-        outro = "\n".join(lines[form_end + 1:]).strip()
-        # Remove emojis from form for clean copy
-        form_clean = re.sub(r'[👤🎯💰🛒🔑📐📦⭐📸🏷️📊📋]\s*', '', form)
-        return intro, form_clean, outro
+        if not val_clean or val_clean in ["-", "—", "нет", "не нужны"]:
+            continue
 
-    return text, None, None
+        for field_name, patterns in FIELD_PATTERNS.items():
+            if field_name in fields:
+                continue
+            for pat in patterns:
+                if re.search(pat, key_clean):
+                    fields[field_name] = val_clean
+                    break
+
+    # Need at least 3 filled fields to count as a form
+    if len(fields) >= 3:
+        return fields
+    return None
 
 
 # ============================================================
-# SAFE SEND HELPERS
+# SEND HELPERS
 # ============================================================
 
 async def send_safe(message: Message, text: str, **kwargs):
@@ -99,95 +171,43 @@ async def send_safe(message: Message, text: str, **kwargs):
             safe_text = text[:4000] if len(text) > 4000 else text
             await message.answer(safe_text, parse_mode=None)
         except Exception as e2:
-            logging.error(f"Failed to send truncated message: {e2}")
-            await message.answer(
-                "Произошла ошибка при отправке ответа. Попробуйте ещё раз.",
-                parse_mode=None
-            )
+            logging.error(f"Failed to send truncated: {e2}")
+            await message.answer("Произошла ошибка. Попробуйте ещё раз.", parse_mode=None)
 
 
-async def send_with_form(message: Message, text: str, **kwargs):
-    """Send AI response. If form detected — send as:
+async def send_copyable_form(message: Message, **kwargs):
+    """Send the data collection form as 3 messages:
     1. Intro text (plain)
-    2. Form (<code> block — one-tap copy in Telegram)
-    3. Outro / instruction (plain, with keyboard)
+    2. Form fields (<code> block — one-tap copy in Telegram)
+    3. Instruction (plain, with keyboard)
     """
-    intro, form_text, outro = split_form_response(text)
+    # 1. Intro
+    await send_safe(message, FORM_INTRO)
 
-    if form_text is None:
-        # No form — send as plain text
-        await send_safe(message, text, **kwargs)
-        return
-
-    # 1. Send intro (plain text, no keyboard)
-    if intro:
-        await send_safe(message, intro)
-
-    # 2. Send form as HTML <code> block (copyable on tap)
-    escaped = html_lib.escape(form_text)
+    # 2. Form as <code> block — THIS is what client taps to copy
+    escaped = html_lib.escape(FORM_TEMPLATE)
     form_html = f"<code>{escaped}</code>"
     try:
         await message.answer(form_html, parse_mode=ParseMode.HTML)
     except Exception as e:
-        logging.warning(f"HTML form failed ({e}), sending plain")
-        await send_safe(message, form_text)
+        logging.warning(f"HTML <code> failed: {e}")
+        await send_safe(message, FORM_TEMPLATE)
 
-    # 3. Send outro or instruction (with keyboard)
-    if outro and outro.strip():
-        tip = outro.strip() + "\n\nНажмите на блок выше, чтобы скопировать 👆"
-        await send_safe(message, tip, **kwargs)
+    # 3. Instruction with keyboard
+    await send_safe(message, FORM_OUTRO, **kwargs)
+
+
+async def send_ai_response(message: Message, text: str, **kwargs):
+    """Send AI response. If AI tried to include a form — replace with
+    our hardcoded copyable form. Otherwise send as plain text."""
+    if ai_wants_form(text):
+        # AI wanted to send form — strip AI's form, send intro + our <code> form
+        intro = strip_form_from_ai(text)
+        if intro and intro != FORM_INTRO:
+            await send_safe(message, intro)
+        await send_copyable_form(message, **kwargs)
     else:
-        await send_safe(
-            message,
-            "Нажмите на блок выше, чтобы скопировать. Заполните и отправьте одним сообщением 👆",
-            **kwargs
-        )
-
-
-# ============================================================
-# FILLED FORM DETECTION (client sends back filled data)
-# ============================================================
-
-def detect_filled_form(text: str) -> dict | None:
-    """Detect if client message is a filled form. Returns parsed fields or None."""
-    # Must have at least 3 filled fields with ":"
-    lines = text.strip().split("\n")
-    fields = {}
-    field_map = {
-        "имя": "name",
-        "артикул": "article",
-        "цена": "wb_price",
-        "количество выкупов": "buyout_count",
-        "выкупов": "buyout_count",
-        "ключевые": "keywords",
-        "ключевые слова": "keywords",
-        "размеры": "dimensions",
-        "короб": "box_capacity",
-        "сколько штук": "box_capacity",
-        "отзыв": "review_count",
-        "количество отзывов": "review_count",
-        "доп": "extra_services",
-        "промокод": "promo_code",
-    }
-
-    for line in lines:
-        if ":" not in line:
-            continue
-        key_part, _, val_part = line.partition(":")
-        key_clean = re.sub(r'[👤🎯💰🛒🔑📐📦⭐📸🏷️📊📋\s]', '', key_part).strip().lower()
-        val_clean = val_part.strip()
-        if not val_clean or val_clean == "-":
-            continue
-
-        for pattern, field_name in field_map.items():
-            if pattern in key_clean:
-                fields[field_name] = val_clean
-                break
-
-    # Need at least name + article + buyout_count (or 3 any fields)
-    if len(fields) >= 3:
-        return fields
-    return None
+        await send_safe(message, text, **kwargs)
 
 
 # ============================================================
@@ -208,6 +228,9 @@ async def start_questioning(message: Message, i18n, state: FSMContext):
 
 @router.message(SupportMode.asking_question)
 async def process_question(message: Message, i18n, language: str, state: FSMContext, bot: Bot):
+    if not message.text:
+        return
+
     # Back to menu
     if message.text in [
         i18n_manager.get("btn_back_to_menu", "ru"),
@@ -239,14 +262,14 @@ async def process_question(message: Message, i18n, language: str, state: FSMCont
     # CHECK: Is this a filled form from client?
     filled = detect_filled_form(message.text)
     if filled:
-        # Client sent filled form — notify manager immediately
+        logging.info(f"Filled form detected from user {user_id}: {filled}")
         await send_safe(
             message,
-            "Данные получены ✅\n\nПередаю менеджеру. Он подготовит точный расчёт в PDF и свяжется с вами 📋",
+            "Данные получены ✅\n\nПередаю менеджеру для подготовки расчёта. Менеджер свяжется с вами в ближайшее время 📋",
             reply_markup=get_ai_support_kb(i18n)
         )
         await log_interaction(user_id, 'ai', 'form_submitted', message.text, "Form received")
-        await notify_manager_lead(bot, message.from_user, filled)
+        await notify_manager_lead(bot, message.from_user, filled, message.text)
         return
 
     # Regular AI conversation
@@ -257,22 +280,21 @@ async def process_question(message: Message, i18n, language: str, state: FSMCont
 
     await log_interaction(user_id, 'ai', 'questioning', message.text, clean_answer)
 
-    # Send response — with form detection for copyable block
-    await send_with_form(message, clean_answer, reply_markup=get_ai_support_kb(i18n))
+    # Send response — intercept form if AI tried to include one
+    await send_ai_response(message, clean_answer, reply_markup=get_ai_support_kb(i18n))
 
     # If AI tagged lead data — also notify manager
     if lead_data:
-        await notify_manager_lead(bot, message.from_user, lead_data)
+        await notify_manager_lead(bot, message.from_user, lead_data, message.text)
 
 
-async def notify_manager_lead(bot: Bot, user, lead_data: dict):
-    """Notify manager about a new lead — triggers manager to join chat."""
+async def notify_manager_lead(bot: Bot, user, lead_data: dict, raw_text: str = ""):
+    """Notify manager: new lead, prepare PDF, connect to chat."""
     msg = (
         f"🆕 НОВАЯ ЗАЯВКА\n\n"
         f"👤 Клиент: {user.full_name}\n"
         f"📱 Telegram: @{user.username or 'нет username'}\n"
         f"🆔 ID: {user.id}\n\n"
-        f"Данные клиента:\n"
     )
 
     field_labels = {
@@ -288,12 +310,17 @@ async def notify_manager_lead(bot: Bot, user, lead_data: dict):
         "promo_code": "🏷️ Промокод",
     }
 
+    has_fields = False
     for key, label in field_labels.items():
         value = lead_data.get(key)
         if value:
             msg += f"{label}: {value}\n"
+            has_fields = True
 
-    msg += "\nПодготовьте PDF-расчёт для оплаты и подключитесь к чату."
+    if not has_fields and raw_text:
+        msg += f"\nСообщение клиента:\n{raw_text[:500]}\n"
+
+    msg += "\n📋 Подготовьте PDF-расчёт и подключитесь к чату клиента."
 
     try:
         await bot.send_message(
@@ -301,5 +328,6 @@ async def notify_manager_lead(bot: Bot, user, lead_data: dict):
             msg,
             reply_markup=get_manager_accept_kb(user.id)
         )
+        logging.info(f"Manager notified about lead from user {user.id}")
     except Exception as e:
         logging.error(f"Failed to notify manager: {e}")
