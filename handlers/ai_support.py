@@ -7,8 +7,12 @@ from services.ai_service import ai_service
 from database.crud import log_interaction
 from keyboards.reply import get_main_menu_kb, get_ai_support_kb
 from middlewares.i18n import i18n_manager
+from handlers.common import notify_manager_about_attempt
 
 router = Router()
+
+# Order keywords to trigger manager alerts
+ORDER_KEYWORDS = ["артикул", "articul", "заказ", "order", "պատվեր", "хочу купить", "хочу заказать", "հաշվարկ", "расчет"]
 
 @router.message(F.text.in_([i18n_manager.get("btn_ask_question", "ru"), i18n_manager.get("btn_ask_question", "am")]))
 async def start_questioning(message: Message, i18n, state: FSMContext):
@@ -30,16 +34,20 @@ async def process_question(message: Message, i18n, language: str, state: FSMCont
 
     # Match contact manager button
     if message.text in [i18n_manager.get("btn_contact_manager", "ru"), i18n_manager.get("btn_contact_manager", "am")]:
-        await state.clear()
         from handlers.common import contact_manager
         await contact_manager(message, i18n, bot)
         return
 
-    # Trigger AI Mode
+    # Trigger AI Answer
     answer = await ai_service.get_answer(message.text, language)
     
     # Log interaction
     await log_interaction(message.from_user.id, 'ai', 'questioning', message.text, answer)
 
-    # Respond with AI answer and provide the specialized AI keyboard (Manager + Calc + Back)
+    # Respond with AI answer and provide specialized AI keyboard
     await message.answer(answer, reply_markup=get_ai_support_kb(i18n))
+    
+    # SYSTEM UPGRADE: Automatic manager notifications on order keywords
+    if any(k.lower() in message.text.lower() for k in ORDER_KEYWORDS):
+        context = f"🔹 ВОПРОС: {message.text}\n🔸 ОТВЕТ ЛИИ: {answer[:300]}..."
+        await notify_manager_about_attempt(bot, message.from_user, context)

@@ -1,87 +1,74 @@
-from aiogram import Router, F, Bot
-from aiogram.filters import CommandStart
-from aiogram.types import Message, CallbackQuery
+from datetime import datetime
+import pytz
+from aiogram import Router, types, Bot
+from aiogram.types import Message
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 
-from database.crud import update_user_language, get_user
-from keyboards.inline import get_language_kb
-from keyboards.reply import get_main_menu_kb, get_existing_client_kb
 from config.config import config
-
+from keyboards.reply import get_main_menu_kb, get_language_kb
+from keyboards.inline import get_manager_accept_kb
+from states.user_states import SalesFunnel
+from services.ai_service import ai_service
+from database.crud import save_user, log_interaction
 from middlewares.i18n import i18n_manager
 
 router = Router()
 
-@router.message(CommandStart())
-async def cmd_start(message: Message, i18n, state: FSMContext, bot: Bot):
+@router.message(Command("start"))
+async def cmd_start(message: Message, i18n, state: FSMContext):
     await state.clear()
-    
-    # Notify manager about new user
     user = message.from_user
-    msg = f"👤 Новый пользователь зашел в бота!\n\nИмя: {user.full_name}\nUsername: @{user.username or 'N/A'}\nID: {user.id}"
+    await save_user(user.id, user.username, user.full_name)
+    await message.answer(i18n("welcome_msg"), reply_markup=get_language_kb())
+    await log_interaction(user.id, 'command', 'start', '/start', 'Welcome message')
+
+@router.message(F.text == "🇷🇺 Русский")
+@router.message(F.text == "🇦🇲 Հայերեն")
+async def set_language(message: Message, state: FSMContext):
+    lang = "ru" if "Русский" in message.text else "am"
+    await state.update_data(language=lang)
+    
+    # Use localized texts
+    i18n = lambda key: i18n_manager.get(key, lang)
+    
+    await message.answer(i18n("lang_selected"), reply_markup=get_main_menu_kb(i18n))
+
+# MANAGER NOTIFICATION HELPERS
+async def notify_manager_about_attempt(bot: Bot, user: types.User, context: str = None):
+    """Notify the manager regardless of the hour, with context if available."""
+    tz = pytz.timezone('Asia/Yerevan')
+    now = datetime.now(tz)
+    current_hour = now.hour
+    
+    is_working_hours = config.work_start_hour <= current_hour < config.work_end_hour
+    hour_prefix = "⏰ (РАБОЧЕЕ ВРЕМЯ)" if is_working_hours else "🌙 (ВНЕРАБОЧЕЕ ВРЕМЯ)"
+    
+    msg = f"{hour_prefix} 🙋 Пользователь просит связаться!\n\nИмя: {user.full_name}\nUsername: @{user.username or 'N/A'}\nID: {user.id}\n"
+    if context:
+        msg += f"\n📝 Контекст диалога (последнее сообщение):\n\"{context}\""
+    
     try:
-        await bot.send_message(config.manager_id, msg)
+        # We ALWAYS send the notification
+        await bot.send_message(
+            config.manager_id, 
+            msg, 
+            reply_markup=get_manager_accept_kb(user.id)
+        )
     except Exception as e:
-        print(f"Failed to notify manager on start: {e}")
+        print(f"Failed to notify manager: {e}")
 
-    await message.answer(i18n("greeting"), reply_markup=get_language_kb())
-
-@router.callback_query(F.data.startswith("lang_"))
-async def set_language(callback: CallbackQuery, i18n_manager, i18n, state: FSMContext):
-    lang = callback.data.split("_")[1]
-    await update_user_language(callback.from_user.id, lang)
-    
-    # Get translated main menu with the new language
-    text = i18n_manager.get("main_menu", lang)
-    kb = get_main_menu_kb(lambda key: i18n_manager.get(key, lang))
-    
-    await callback.message.delete()
-    await callback.message.answer(text, reply_markup=kb)
-    await callback.answer()
-
-@router.message(F.text.contains("🔙"))
-@router.message(F.text.casefold().in_({"back", "назад", "меню", "menu"}))
-async def go_to_main_menu(message: Message, i18n, state: FSMContext):
-    await state.clear()
-    await message.answer(i18n("main_menu"), reply_markup=get_main_menu_kb(i18n))
-
-@router.message(F.text.in_([i18n_manager.get("btn_existing_client", "ru"), i18n_manager.get("btn_existing_client", "am")]))
-async def existing_client_menu(message: Message, i18n):
-    await message.answer(i18n("existing_client_menu"), reply_markup=get_existing_client_kb(i18n))
-
-@router.message(F.text.in_([i18n_manager.get("btn_check_status", "ru"), i18n_manager.get("btn_check_status", "am")]))
-async def check_status(message: Message, i18n):
-    await message.answer(i18n("status_stub"))
-
-from datetime import datetime, timedelta, timezone
-from keyboards.inline import get_language_kb, get_manager_accept_kb
-
-# ... (other imports) ...
-
-@router.message(F.text.in_([i18n_manager.get("btn_contact_manager", "ru"), i18n_manager.get("btn_contact_manager", "am")]))
 async def contact_manager(message: Message, i18n, bot: Bot):
-    # Erevan Time (UTC+4)
-    now_erevan = datetime.now(timezone.utc) + timedelta(hours=4)
-    current_hour = now_erevan.hour
+    tz = pytz.timezone('Asia/Yerevan')
+    now = datetime.now(tz)
+    current_hour = now.hour
     
-    # Check working hours
+    # Always notify the manager
+    await notify_manager_about_attempt(bot, message.from_user, message.text)
+
+    # Check working hours for the USER response
     if config.work_start_hour <= current_hour < config.work_end_hour:
-        # Notify user (Wait message)
-        wait_msg = i18n("wait_for_manager_msg")
-        await message.answer(wait_msg)
-        
-        # Notify manager about contact request with ACTION button
-        user = message.from_user
-        msg = f"🙋 Пользователь просит связаться!\n\nИмя: {user.full_name}\nUsername: @{user.username or 'N/A'}\nID: {user.id}"
-        try:
-            await bot.send_message(
-                config.manager_id, 
-                msg, 
-                reply_markup=get_manager_accept_kb(user.id)
-            )
-        except Exception as e:
-            print(f"Failed to notify manager: {e}")
-            
+        await message.answer(i18n("wait_for_manager_msg"))
     else:
         # Off-duty
         await message.answer(i18n("off_duty_msg"))
