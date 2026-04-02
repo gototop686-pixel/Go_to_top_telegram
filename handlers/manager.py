@@ -5,35 +5,47 @@ from config.config import config
 from states.user_states import ManagerChat
 from keyboards.reply import get_main_menu_kb
 from aiogram.fsm.storage.base import StorageKey
+from middlewares.i18n import i18n_manager
 
 router = Router()
 
-def get_manager_chat_kb() -> ReplyKeyboardMarkup:
-    kb = [[KeyboardButton(text="❌ Завершить диалог")]]
-    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, one_time_keyboard=False)
+def get_chat_kb(lang: str = "ru") -> ReplyKeyboardMarkup:
+    # Use localized or bilingual text for the exit button
+    text = "❌ Завершить диалог / Ավարտել"
+    kb = [[KeyboardButton(text=text)]]
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
 @router.callback_query(F.data.startswith("accept_chat:"))
 async def accept_chat_handler(callback: CallbackQuery, state: FSMContext, bot: Bot):
     user_id = int(callback.data.split(":")[1])
     
-    # Set manager state
+    # Force manager state
     await state.set_state(ManagerChat.in_chat)
     await state.update_data(active_user_id=user_id)
     
-    # Set user state globally
+    # Force user state
     user_state_key = StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id)
     await bot.get_context(user_state_key).set_state(ManagerChat.in_chat)
+    # Also save manager's ID to user's data so they know who is helping
+    await bot.get_context(user_state_key).update_data(manager_id=config.manager_id)
     
     await callback.message.edit_text(f"✅ Чат с пользователем {user_id} активен.")
+    
+    # Send NEW keyboard to manager
     await callback.message.answer(
-        "📝 Теперь ваши сообщения отправляются клиенту.\n\n"
-        "Чтобы выйти, используйте кнопку «❌ Завершить диалог» ниже.", 
-        reply_markup=get_manager_chat_kb()
+        "📝 Режим чата активен. Все сообщения идут клиенту.\n\n"
+        "Чтобы выйти, нажмите на кнопку ниже 👇", 
+        reply_markup=get_chat_kb("ru")
     )
     
-    # Notify user
+    # Send NEW keyboard to user
     try:
-        await bot.send_message(user_id, "Лия (Менеджер) подключилась к чату! 👱‍♀️ Чем могу вам помочь?")
+        await bot.send_message(
+            user_id, 
+            "Лия (Менеджер) подключилась к чату! 👱‍♀️ Чем могу вам помочь?\n\n"
+            "Вы можете завершить чат, нажав на кнопку ниже.",
+            reply_markup=get_chat_kb("am")
+        )
     except Exception:
         pass
     
@@ -41,28 +53,34 @@ async def accept_chat_handler(callback: CallbackQuery, state: FSMContext, bot: B
 
 @router.message(ManagerChat.in_chat)
 async def forward_chat_message(message: Message, state: FSMContext, bot: Bot):
+    # Exit commands/text
+    exit_texts = [
+        "❌ Завершить диалог / Ավարտել",
+        "Завершить диалог",
+        "Ավարտել",
+        i18n_manager.get("btn_back_to_menu", "ru"),
+        i18n_manager.get("btn_back_to_menu", "am")
+    ]
+    
+    if message.text in exit_texts:
+        await end_chat_handler(message, state, bot)
+        return
+
     data = await state.get_data()
-    active_user_id = data.get("active_user_id")
     
     # MANAGER -> USER
     if message.from_user.id == config.manager_id:
-        if message.text == "❌ Завершить диалог":
-            await end_chat_handler(message, state, bot)
-            return
-            
+        active_user_id = data.get("active_user_id")
         if active_user_id:
             try:
-                # User's prefix
-                prefix = "👱‍♀️ Лия (Менеджер):"
-                await bot.send_message(active_user_id, f"{prefix} {message.text}")
+                await bot.send_message(active_user_id, f"👱‍♀️ Лия (Менеджер): {message.text}")
             except Exception as e:
-                await message.answer(f"Ошибка при пересылке клиенту: {e}")
+                await message.answer(f"Ошибка: {e}")
     
     # USER -> MANAGER
     else:
-        # If this is the user who is being helped
-        from_user = message.from_user
-        msg_to_manager = f"📩 Клиент {from_user.full_name} (@{from_user.username}):\n\n{message.text}"
+        # Check if the manager ID is in config
+        msg_to_manager = f"📩 Клиент {message.from_user.full_name}:\n\n{message.text}"
         try:
             await bot.send_message(config.manager_id, msg_to_manager)
         except Exception:
@@ -70,20 +88,31 @@ async def forward_chat_message(message: Message, state: FSMContext, bot: Bot):
 
 async def end_chat_handler(message: Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
-    user_id = data.get("active_user_id")
     
-    # Manager side
-    await state.clear()
-    # Provide a simple keyboard to the manager to return to normal bot mode
-    # Assuming manager uses RU
-    await message.answer("Диалог завершен. Вы вернулись в режим управления ботом.", reply_markup=get_main_menu_kb(lambda x: x))
-    
-    # User side
-    if user_id:
-        user_state_key = StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id)
-        await bot.get_context(user_state_key).clear()
+    # If manager clicks exit
+    if message.from_user.id == config.manager_id:
+        user_id = data.get("active_user_id")
+        await state.clear()
+        await message.answer("Диалог завершен.", reply_markup=get_main_menu_kb(lambda x: "🔙 В меню"))
+        
+        if user_id:
+            user_state_key = StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id)
+            await bot.get_context(user_state_key).clear()
+            await bot.send_message(user_id, "Менеджер завершил диалог. Бот снова в режиме Лии! 🤖", reply_markup=get_main_menu_kb(lambda x: "Меню"))
+            
+    # If user clicks exit
+    else:
+        await state.clear()
+        await message.answer("Диалог завершен. Чем еще я могу помочь? 🤖", reply_markup=get_main_menu_kb(lambda x: "Меню"))
         
         try:
-            await bot.send_message(user_id, "Менеджер Лия завершила диалог. Я снова в автоматическом режиме! 🤖")
+            await bot.send_message(config.manager_id, f"⏹ Пользователь {message.from_user.full_name} завершил диалог.")
+            # Clear manager state too if they were talking to THIS user
+            manager_state_key = StorageKey(bot_id=bot.id, chat_id=config.manager_id, user_id=config.manager_id)
+            m_ctx = bot.get_context(manager_state_key)
+            m_data = await m_ctx.get_data()
+            if m_data.get("active_user_id") == message.from_user.id:
+                await m_ctx.clear()
+                await bot.send_message(config.manager_id, "Ваш текущий чат закрыт.", reply_markup=get_main_menu_kb(lambda x: "Ок"))
         except Exception:
             pass
