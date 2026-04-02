@@ -1,6 +1,12 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from typing import Callable
 
+def get_language_kb() -> ReplyKeyboardMarkup:
+    kb = [
+        [KeyboardButton(text="🇷🇺 Русский"), KeyboardButton(text="🇦🇲 Հայերեն")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
+
 def get_main_menu_kb(i18n: Callable) -> ReplyKeyboardMarkup:
     kb = [
         [KeyboardButton(text=i18n("btn_new_client"))],
