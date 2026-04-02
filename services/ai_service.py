@@ -41,9 +41,9 @@ class AIService:
             )
             # Flagship fast models for Groq (2026 lineup)
             self.models_to_try = [
-                "llama-3.1-70b-versatile",
-                "llama3-70b-8192", 
-                "mixtral-8x7b-32768"
+                "llama-3.3-70b-versatile",
+                "llama-3.2-90b-vision-preview",
+                "llama-3.2-11b-vision-preview"
             ]
             self.model_name = self.models_to_try[0]
             logging.info(f"AI Service (Groq) initialized successfully.")
