@@ -34,9 +34,9 @@ KNOWLEDGE_BASE_AM = """
 class AIService:
     def __init__(self):
         try:
-            # GROQ (Groq Cloud) Integration - using standard gsk_ key prefix
+            # GROQ CLOUD Integration (using the latest flagship models)
             self.client = AsyncOpenAI(
-                api_key=config.grok_api_key, # Keeping var name for dashboard stability
+                api_key=config.groq_api_key,
                 base_url="https://api.groq.com/openai/v1"
             )
             # Flagship fast models for Groq (2026 lineup)
@@ -46,7 +46,7 @@ class AIService:
                 "mixtral-8x7b-32768"
             ]
             self.model_name = self.models_to_try[0]
-            logging.info(f"AI Service (Groq) initialized. Priority models: {self.models_to_try}")
+            logging.info(f"AI Service (Groq) initialized successfully.")
         except Exception as e:
             logging.error(f"Failed to initialize Groq AI: {e}")
 
@@ -54,8 +54,9 @@ class AIService:
         kb = KNOWLEDGE_BASE_RU if language == "ru" else KNOWLEDGE_BASE_AM
         
         system_prompt = f"""
-        Ты — высококвалифицированный эксперт по продажам компании GO TO TOP (Wildberries promotion).
-        Твое общение должно быть максимально профессиональным, теплым и соответствовать официальным скриптам продаж.
+        Ты — элитный эксперт и бизнес-консультант компании GO TO TOP (Wildberries promotion). 
+        Твое общение должно быть на высочайшем профессиональном уровне, теплым и деловым. 
+        Ты — мощный ИИ на базе Groq, обеспечиваешь мгновенную и глубокую аналитику.
 
         Язык общения: {language if language != 'am' else 'Հայերեն (Armenian)'}.
 
@@ -92,10 +93,9 @@ class AIService:
                     
             except Exception as e:
                 err_text = str(e)
-                logging.warning(f"Model {model} failed: {err_text}")
-                # Try next model for stability
+                logging.warning(f"Model {model} failed on Groq: {err_text}")
                 continue
         
-        return "Извините, система ИИ временно недоступна. Пожалуйста, обратитесь к менеджеру напрямую."
+        return "Извините, система Groq временно недоступна. Пожалуйста, обратитесь к менеджеру напрямую."
 
 ai_service = AIService()
