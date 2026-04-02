@@ -108,14 +108,9 @@ async def process_question(message: Message, i18n, language: str, state: FSMCont
     # Send response (plain text, no parse_mode)
     await send_safe(message, clean_answer, reply_markup=get_ai_support_kb(i18n))
     
-    # If lead data detected — notify manager
+    # If lead data detected (client sent filled form) — notify manager
     if lead_data:
         await notify_manager_lead(bot, message.from_user, lead_data)
-    
-    # Also check for order keywords
-    elif any(k.lower() in message.text.lower() for k in ORDER_KEYWORDS):
-        context = f"Вопрос: {message.text}\nОтвет Лии: {clean_answer[:300]}..."
-        await notify_manager_about_attempt(bot, message.from_user, context)
 
 
 async def notify_manager_lead(bot: Bot, user, lead_data: dict):

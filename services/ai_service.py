@@ -12,27 +12,35 @@ from config.config import config
 # PROMPT BLOCK SYSTEM — loads only needed blocks per message
 # ============================================================
 
-PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "..", "prompts")
+# Find project root directory (where bot.py is)
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(_THIS_DIR)
 
-# Fallback: full prompt file
-FULL_PROMPT_PATH = os.path.join(os.path.dirname(__file__), "system_prompt.md")
+PROMPTS_DIR = os.path.join(_PROJECT_ROOT, "prompts")
+FULL_PROMPT_PATH = os.path.join(_THIS_DIR, "system_prompt.md")
 
 
 def load_prompt_block(filename: str) -> str:
     """Load a prompt block from the prompts/ directory."""
-    path = os.path.join(PROMPTS_DIR, filename)
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read()
+    try:
+        path = os.path.join(PROMPTS_DIR, filename)
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read()
+    except Exception as e:
+        logging.warning(f"Failed to load block {filename}: {e}")
     return ""
 
 
 def load_full_prompt() -> str:
     """Load the full prompt as fallback."""
-    if os.path.exists(FULL_PROMPT_PATH):
-        with open(FULL_PROMPT_PATH, "r", encoding="utf-8") as f:
-            return f.read()
-    return "Ты — Лия, AI-ассистент Go to Top. Помогаешь с продвижением на Wildberries."
+    try:
+        if os.path.exists(FULL_PROMPT_PATH):
+            with open(FULL_PROMPT_PATH, "r", encoding="utf-8") as f:
+                return f.read()
+    except Exception as e:
+        logging.warning(f"Failed to load full prompt: {e}")
+    return "Ты — Лия, AI-ассистент Go to Top. Помогаешь с продвижением на Wildberries. Отвечай кратко, по делу."
 
 
 # Pre-load all blocks at startup
