@@ -103,6 +103,30 @@ async def accept_chat_request(user_id: int):
         await session.commit()
 
 
+async def clear_finished_sessions_today():
+    """Delete all finished chat sessions from today."""
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    async with async_session() as session:
+        from sqlalchemy import delete
+        await session.execute(
+            delete(ChatSession)
+            .where(ChatSession.status == "closed")
+            .where(ChatSession.ended_at >= today_start)
+        )
+        await session.commit()
+
+
+async def clear_all_pending_requests():
+    """Delete all pending chat requests."""
+    async with async_session() as session:
+        from sqlalchemy import delete
+        await session.execute(
+            delete(ChatRequest)
+            .where(ChatRequest.status == "pending")
+        )
+        await session.commit()
+
+
 async def get_user(user_id: int) -> Optional[Dict]:
     async with async_session() as session:
         result = await session.execute(select(User).where(User.user_id == user_id))

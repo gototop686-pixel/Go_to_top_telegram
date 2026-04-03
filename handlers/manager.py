@@ -13,7 +13,8 @@ from database.crud import (
     get_user, map_message, get_client_msg_id, 
     start_chat_session, end_chat_session,
     get_active_sessions_count, get_closed_sessions_today,
-    get_pending_requests, accept_chat_request
+    get_pending_requests, accept_chat_request,
+    clear_finished_sessions_today, clear_all_pending_requests
 )
 
 router = Router()
@@ -75,7 +76,8 @@ def get_dashboard_inline_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🟢 Активные чаты", callback_data="dash:active")],
         [InlineKeyboardButton(text="🔔 Запросы на чат", callback_data="dash:requests")],
         [InlineKeyboardButton(text="✅ Завершённые сегодня", callback_data="dash:finished")],
-        [InlineKeyboardButton(text="🔄 Обновить", callback_data="dash:refresh")]
+        [InlineKeyboardButton(text="🔄 Обновить", callback_data="dash:refresh")],
+        [InlineKeyboardButton(text="🚨 Сбросить все чаты", callback_data="dash:reset_all")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -263,20 +265,34 @@ async def accept_chat_handler(callback: CallbackQuery, state: FSMContext, bot: B
         )
         return
 
-    # Get client info from the notification message
-    client_name = f"Участник {user_id}"
+    # Get client info — try Telegram API first, then parse from message
+    client_name = ""
     client_username = ""
 
-    if callback.message and callback.message.text:
-        # Match Russian "Имя:", Armenian "Անուն:", or generic "Клиент:"
-        name_match = re.search(r'(?:Имя|Անուն|Клиент):\s*(.+)', callback.message.text)
-        if name_match:
-            client_name = name_match.group(1).strip()
+    # Try to get real name from Telegram
+    try:
+        chat_info = await bot.get_chat(user_id)
+        client_name = chat_info.full_name or ""
+        client_username = chat_info.username or ""
+    except Exception:
+        pass
+
+    # Fallback: parse from notification message
+    if not client_name and callback.message and callback.message.text:
+        for pattern in [r'Клиент:\s*(.+)', r'Имя:\s*(.+)', r'Անուն:\s*(.+)', r'👤\s*(.+)']:
+            name_match = re.search(pattern, callback.message.text)
+            if name_match:
+                client_name = name_match.group(1).strip()
+                break
         
-        # Match Russian "Username:", Armenian "Օգտատեր:", or notification "Username:"
-        username_match = re.search(r'(?:Username|Telegram|Օգտատեր):\s*@?(\S+)', callback.message.text)
-        if username_match:
-            client_username = username_match.group(1).strip()
+        if not client_username:
+            username_match = re.search(r'@(\w+)', callback.message.text)
+            if username_match:
+                client_username = username_match.group(1).strip()
+
+    # Last resort
+    if not client_name:
+        client_name = f"Клиент {user_id}"
 
     chats[user_id] = {"name": client_name, "username": client_username}
 
@@ -426,9 +442,11 @@ async def forward_chat_message(message: Message, state: FSMContext, bot: Bot):
                 # Map messages for sync (edit/delete)
                 await map_message(message.chat.id, message.message_id, active_uid, cl_msg.message_id)
 
-                # Small confirmation for the manager
+                # Small confirmation — show client name clearly
+                confirm_name = name if name != f"Клиент {active_uid}" else name
+                confirm_un = f" (@{username})" if username and username != "N/A" else ""
                 await message.reply(
-                    f"✅ Отправлено: {name} (@{username})",
+                    f"✅ → {confirm_name}{confirm_un}",
                     parse_mode=None
                 )
             except Exception as e:
@@ -730,10 +748,17 @@ async def process_dashboard_callback(callback: CallbackQuery, bot: Bot):
         lines = ["<b>✅ Завершённые сегодня:</b>\n"]
         for sess, name in closed:
             time_str = sess.ended_at.strftime("%H:%M")
-            safe_name = name.replace("<", "&lt;").replace(">", "&gt;")
+            safe_name = (name or "Клиент").replace("<", "&lt;").replace(">", "&gt;")
             lines.append(f"🏁 {time_str} — {safe_name} [ID: {sess.user_id}]")
+        
+        lines.append(f"\nВсего: {len(closed)}")
+        
+        clear_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🗑 Удалить список", callback_data="dash:clear_finished")],
+            [InlineKeyboardButton(text="🔙 Назad", callback_data="dash:refresh")]
+        ])
             
-        await callback.message.answer("\n".join(lines), parse_mode="HTML")
+        await callback.message.answer("\n".join(lines), reply_markup=clear_kb, parse_mode="HTML")
         await callback.answer()
 
     elif action == "requests":
@@ -767,6 +792,72 @@ async def process_dashboard_callback(callback: CallbackQuery, bot: Bot):
         
         await callback.message.answer("\n".join(lines), reply_markup=kb, parse_mode="HTML")
         await callback.answer()
+
+    elif action == "reset_all":
+        # Reset ALL active chats — both manager and all clients get notified
+        manager_id = callback.from_user.id
+        chats = _get_open(manager_id)
+        
+        if not chats:
+            await callback.answer("Нет активных чатов для сброса.", show_alert=True)
+            return
+
+        count = len(chats)
+        
+        # Close each chat — notify clients
+        for uid in list(chats.keys()):
+            try:
+                # Clear client FSM
+                user_ctx = await get_user_fsm(bot, bot.session, uid)
+            except Exception:
+                pass
+            
+            # Notify client
+            user_data = await get_user(uid)
+            user_lang = user_data.get("language", "ru") if user_data else "ru"
+            user_i18n = get_i18n_for_user(user_lang)
+            try:
+                await bot.send_message(
+                    uid,
+                    "Менеджер завершил диалог. Если будут вопросы — я всегда на связи! 🎯",
+                    reply_markup=get_main_menu_kb(user_i18n),
+                    parse_mode=None
+                )
+            except Exception:
+                pass
+            
+            # End DB session
+            await end_chat_session(uid)
+        
+        # Clear all in-memory state
+        open_chats.pop(manager_id, None)
+        active_chat.pop(manager_id, None)
+        await clear_all_pending_requests()
+        
+        manager_i18n = get_i18n_for_user("ru")
+        await callback.message.answer(
+            f"🚨 Сброшено {count} чатов. Все диалоги закрыты.\n"
+            f"Бот снова отвечает клиентам.",
+            reply_markup=get_main_menu_kb(manager_i18n),
+            parse_mode=None
+        )
+        await callback.answer("Все чаты сброшены!")
+
+    elif action == "clear_finished":
+        await clear_finished_sessions_today()
+        await callback.answer("Список завершённых очищен!", show_alert=True)
+        # Refresh dashboard
+        active_count = await get_active_sessions_count()
+        text = (
+            "<b>📊 Панель управления менеджера</b>\n\n"
+            f"🟢 Активных диалогов: {active_count}\n"
+            f"✅ Завершено сегодня: 0\n\n"
+            "Список очищен ✅"
+        )
+        try:
+            await callback.message.edit_text(text, reply_markup=get_dashboard_inline_kb(), parse_mode="HTML")
+        except Exception:
+            pass
 
 
 # ============================================================
