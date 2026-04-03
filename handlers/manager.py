@@ -190,21 +190,24 @@ async def accept_chat_handler(callback: CallbackQuery, state: FSMContext, bot: B
         await callback.answer(f"Переключено на {name}")
         await bot.send_message(
             manager_id,
-            f"🔀 Переключено на чат с {name} (ID: {user_id})",
+            f"🔀 Переключено на чат с {name} (@{chats[user_id].get('username', 'N/A')}) (ID: {user_id})",
             reply_markup=get_manager_chat_kb(manager_id),
             parse_mode=None
         )
         return
 
     # Get client info from the notification message
-    client_name = f"Клиент {user_id}"
+    client_name = f"Участник {user_id}"
     client_username = ""
 
     if callback.message and callback.message.text:
-        name_match = re.search(r'Клиент:\s*(.+)', callback.message.text)
+        # Match Russian "Имя:", Armenian "Անուն:", or generic "Клиент:"
+        name_match = re.search(r'(?:Имя|Անուն|Клиент):\s*(.+)', callback.message.text)
         if name_match:
             client_name = name_match.group(1).strip()
-        username_match = re.search(r'Telegram:\s*@(\S+)', callback.message.text)
+        
+        # Match Russian "Username:", Armenian "Օգտատեր:", or notification "Username:"
+        username_match = re.search(r'(?:Username|Telegram|Օգտատեր):\s*@?(\S+)', callback.message.text)
         if username_match:
             client_username = username_match.group(1).strip()
 
@@ -270,7 +273,7 @@ async def switch_chat_inline(callback: CallbackQuery, state: FSMContext, bot: Bo
     await callback.answer(f"Переключено на {name}")
     await bot.send_message(
         manager_id,
-        f"🔀 Активный чат: {name} (ID: {user_id})",
+        f"🔀 Активный чат: {name} (@{chats[user_id].get('username', 'N/A')}) (ID: {user_id})",
         reply_markup=get_manager_chat_kb(manager_id),
         parse_mode=None
     )
@@ -323,7 +326,7 @@ async def forward_chat_message(message: Message, state: FSMContext, bot: Bot):
                 if target_uid in chats:
                     name = await _activate_chat(sender_id, target_uid, bot, state, state.storage)
                     await message.answer(
-                        f"🔀 Активный чат: {name} (ID: {target_uid})",
+                        f"🔀 Активный чат: {name} (@{chats[target_uid].get('username', 'N/A')}) (ID: {target_uid})",
                         reply_markup=get_manager_chat_kb(sender_id),
                         parse_mode=None
                     )
@@ -334,12 +337,22 @@ async def forward_chat_message(message: Message, state: FSMContext, bot: Bot):
         # MANAGER -> active client
         active_uid = _get_active(sender_id)
         if active_uid:
+            chats = _get_open(sender_id)
+            info = chats.get(active_uid, {})
+            name = info.get("name", "Клиент")
+            username = info.get("username", "N/A")
+
             try:
                 # Forward everything (media + text) to client
                 await bot.copy_message(
                     chat_id=active_uid,
                     from_chat_id=message.chat.id,
                     message_id=message.message_id
+                )
+                # Small confirmation for the manager
+                await message.reply(
+                    f"✅ Отправлено: {name} (@{username})",
+                    parse_mode=None
                 )
             except Exception as e:
                 await message.answer(f"Ошибка отправки клиенту: {e}", parse_mode=None)
@@ -413,9 +426,9 @@ async def show_chat_list(message: Message, state: FSMContext, bot: Bot):
 
     lines = ["📋 Открытые чаты:\n"]
     for uid, info in chats.items():
-        name = info.get("name", str(uid))
-        marker = " ← активный" if uid == active else ""
-        lines.append(f"{'🟢' if uid == active else '⚪'} {name} (ID: {uid}){marker}")
+        username = info.get("username", "N/A")
+        marker = " ← АКТИВНЫЙ" if uid == active else ""
+        lines.append(f"{'🟢' if uid == active else '⚪'} {name} (@{username}) (ID: {uid}){marker}")
 
     lines.append(f"\nВсего: {len(chats)}")
 
