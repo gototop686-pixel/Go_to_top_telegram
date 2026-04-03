@@ -17,9 +17,26 @@ async def handle_ping(request):
 
 
 async def main():
-    await init_db()
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+
+    # Start web server FIRST so Render sees the port immediately
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    app.router.add_get("/health", handle_ping)
     
-    # No default parse_mode — AI sends plain text
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    port = int(os.getenv("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logging.info(f"Web server started on port {port}")
+
+    # Now initialize database
+    await init_db()
+    logging.info("Database initialized")
+
+    # Setup bot
     bot = Bot(
         token=config.bot_token,
         default=DefaultBotProperties()
@@ -32,7 +49,7 @@ async def main():
     # Order matters: manager first (handles ManagerChat state),
     # then common (/start, language, menu buttons),
     # then FAQ (static Armenian + AI redirect for Russian),
-    # then AI support, then funnel
+    # then AI support, then funnel, then prices
     dp.include_router(manager.router)
     dp.include_router(common.router)
     dp.include_router(faq.router)
@@ -40,23 +57,9 @@ async def main():
     dp.include_router(sales_funnel.router)
     dp.include_router(prices.router)
 
-    logging.basicConfig(level=logging.INFO, stream=sys.stdout)
-
-    # Health check endpoint for Render
-    app = web.Application()
-    app.router.add_get("/", handle_ping)
-    
-    runner = web.AppRunner(app)
-    await runner.setup()
-    
-    port = int(os.getenv("PORT", 8080))
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    
-    logging.info(f"Starting web server on port {port}")
-    await site.start()
-
     # Clean start: delete old webhook
     await bot.delete_webhook(drop_pending_updates=True)
+    logging.info("Starting polling...")
 
     await dp.start_polling(bot)
 
