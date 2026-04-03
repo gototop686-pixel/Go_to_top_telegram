@@ -200,32 +200,10 @@ async def _close_chat_for_client(manager_id: int, user_id: int, bot: Bot, storag
 
 
 # ============================================================
-# STALE BUTTONS — catch client pressing "end chat" after manager already ended it
+# SLASH COMMANDS — work ANY time, no active chat needed
 # ============================================================
 
 from aiogram.filters import Command
-
-
-@router.message(F.text.in_(["❌ Завершить чат", "❌ Завершить диалог / Ավարտել", "Завершить чат", "Завершить диалог"]))
-async def stale_end_chat_button(message: Message, i18n, state: FSMContext):
-    """Client presses 'end chat' but chat was already ended by manager.
-    FSM state is None, so ManagerChat.in_chat handler doesn't catch it.
-    Just clear state and show normal menu."""
-    current = await state.get_state()
-    if current == ManagerChat.in_chat.state:
-        return  # Let the in_chat handler deal with it
-    # Not in chat anymore — just show menu
-    await state.clear()
-    await message.answer(
-        i18n("main_menu"),
-        reply_markup=get_main_menu_kb(i18n),
-        parse_mode=None
-    )
-
-
-# ============================================================
-# SLASH COMMANDS — work ANY time, no active chat needed
-# ============================================================
 
 
 @router.message(Command("dashboard", "panel", "dash"))
@@ -789,3 +767,27 @@ async def process_dashboard_callback(callback: CallbackQuery, bot: Bot):
         
         await callback.message.answer("\n".join(lines), reply_markup=kb, parse_mode="HTML")
         await callback.answer()
+
+
+# ============================================================
+# STALE EXIT BUTTONS — when chat already ended but button still visible
+# This MUST be at the bottom so ManagerChat.in_chat handler gets priority
+# ============================================================
+
+@router.message(F.text.in_([
+    "❌ Завершить чат",
+    "❌ Завершить диалог / Ավարտել",
+    "Завершить чат",
+    "Завершить диалог",
+    "Ավարտել",
+]))
+async def stale_end_chat_button(message: Message, i18n, state: FSMContext):
+    """Catch exit button presses when user is NOT in ManagerChat.in_chat state.
+    This means the chat was already ended (by manager or system).
+    Just clear state and show the normal main menu."""
+    await state.clear()
+    await message.answer(
+        i18n("main_menu"),
+        reply_markup=get_main_menu_kb(i18n),
+        parse_mode=None
+    )
