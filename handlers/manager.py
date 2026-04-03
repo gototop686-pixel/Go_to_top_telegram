@@ -283,11 +283,7 @@ async def switch_chat_inline(callback: CallbackQuery, state: FSMContext, bot: Bo
 @router.message(ManagerChat.in_chat)
 async def forward_chat_message(message: Message, state: FSMContext, bot: Bot):
     sender_id = message.from_user.id
-
-    if not message.text:
-        return
-
-    text = message.text.strip()
+    text = message.text.strip() if message.text else message.caption.strip() if message.caption else ""
 
     # ---- EXIT COMMANDS (both manager and client) ----
     exit_cmds = [
@@ -339,7 +335,12 @@ async def forward_chat_message(message: Message, state: FSMContext, bot: Bot):
         active_uid = _get_active(sender_id)
         if active_uid:
             try:
-                await bot.send_message(active_uid, text, parse_mode=None)
+                # Forward everything (media + text) to client
+                await bot.copy_message(
+                    chat_id=active_uid,
+                    from_chat_id=message.chat.id,
+                    message_id=message.message_id
+                )
             except Exception as e:
                 await message.answer(f"Ошибка отправки клиенту: {e}", parse_mode=None)
         else:
@@ -374,11 +375,25 @@ async def forward_chat_message(message: Message, state: FSMContext, bot: Bot):
         prefix = "⚠️ [другой чат] "
 
     try:
-        await bot.send_message(
-            manager_id,
-            f"📩 {prefix}[{client_name} @{username}]:\n{text}",
-            parse_mode=None
-        )
+        # First send who it's from if it's media or has no text
+        info_text = f"📩 {prefix}[{client_name} @{username}]"
+        
+        # If it's just text, send it normally
+        if message.text:
+            await bot.send_message(
+                manager_id,
+                f"{info_text}:\n{message.text}",
+                parse_mode=None
+            )
+        else:
+            # If it's media, send info text first, then copy the media
+            await bot.send_message(manager_id, f"{info_text}:", parse_mode=None)
+            await bot.copy_message(
+                chat_id=manager_id,
+                from_chat_id=message.chat.id,
+                message_id=message.message_id
+            )
+            
     except Exception as e:
         logging.error(f"Failed to forward to manager: {e}")
 
