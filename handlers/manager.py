@@ -628,12 +628,12 @@ async def show_dashboard(message: Message):
     closed_today = await get_closed_sessions_today()
     
     text = (
-        "📊 **Панель управления менеджера**\n\n"
+        "<b>📊 Панель управления менеджера</b>\n\n"
         f"🟢 Активных диалогов: {active_count}\n"
         f"✅ Завершено сегодня: {len(closed_today)}\n\n"
         "Выберите раздел для деталей 👇"
     )
-    await message.answer(text, reply_markup=get_dashboard_inline_kb(), parse_mode="Markdown")
+    await message.answer(text, reply_markup=get_dashboard_inline_kb(), parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("dash:"))
@@ -644,13 +644,13 @@ async def process_dashboard_callback(callback: CallbackQuery, bot: Bot):
         active_count = await get_active_sessions_count()
         closed_today = await get_closed_sessions_today()
         text = (
-            "📊 **Панель управления менеджера**\n\n"
+            "<b>📊 Панель управления менеджера</b>\n\n"
             f"🟢 Активных диалогов: {active_count}\n"
             f"✅ Завершено сегодня: {len(closed_today)}\n\n"
             "Обновлено ✅"
         )
         try:
-            await callback.message.edit_text(text, reply_markup=get_dashboard_inline_kb(), parse_mode="Markdown")
+            await callback.message.edit_text(text, reply_markup=get_dashboard_inline_kb(), parse_mode="HTML")
         except Exception:
             pass
         await callback.answer()
@@ -662,13 +662,15 @@ async def process_dashboard_callback(callback: CallbackQuery, bot: Bot):
             await callback.answer("Нет активных чатов в оперативной памяти.", show_alert=True)
             return
         
-        lines = ["🟢 **Список активных чатов:**\n"]
+        lines = ["<b>🟢 Список активных чатов:</b>\n"]
         for uid, info in chats.items():
             name = info.get("name", "Клиент")
             username = info.get("username", "N/A")
+            # Replace special chars that might break HTML
+            name = name.replace("<", "&lt;").replace(">", "&gt;")
             lines.append(f"👤 {name} (@{username}) [ID: {uid}]")
         
-        await callback.message.answer("\n".join(lines), parse_mode="Markdown")
+        await callback.message.answer("\n".join(lines), parse_mode="HTML")
         await callback.answer()
 
     elif action == "finished":
@@ -677,12 +679,13 @@ async def process_dashboard_callback(callback: CallbackQuery, bot: Bot):
             await callback.answer("Сегодня ещё нет завершённых чатов.", show_alert=True)
             return
             
-        lines = ["✅ **Завершённые сегодня:**\n"]
+        lines = ["<b>✅ Завершённые сегодня:</b>\n"]
         for sess, name in closed:
             time_str = sess.ended_at.strftime("%H:%M")
-            lines.append(f"🏁 {time_str} — {name} [ID: {sess.user_id}]")
+            safe_name = name.replace("<", "&lt;").replace(">", "&gt;")
+            lines.append(f"🏁 {time_str} — {safe_name} [ID: {sess.user_id}]")
             
-        await callback.message.answer("\n".join(lines), parse_mode="Markdown")
+        await callback.message.answer("\n".join(lines), parse_mode="HTML")
         await callback.answer()
 
     elif action == "requests":
