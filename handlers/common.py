@@ -10,7 +10,7 @@ from config.config import config
 from keyboards.reply import get_main_menu_kb, get_language_kb
 from keyboards.inline import get_manager_accept_kb
 from services.ai_service import ai_service
-from database.crud import save_user, update_user_language, log_interaction
+from database.crud import save_user, update_user_language, log_interaction, save_chat_request
 from middlewares.i18n import i18n_manager
 
 router = Router()
@@ -127,6 +127,14 @@ async def contact_manager_btn(message: Message, i18n, bot: Bot):
 # MANAGER NOTIFICATION HELPERS
 async def notify_manager_about_attempt(bot: Bot, user: types.User, context: str = None):
     """Notify the manager with context."""
+    await save_chat_request(
+        user_id=user.id,
+        user_name=user.full_name or "",
+        username=user.username or "",
+        request_type="manager_request",
+        message_preview=context or ""
+    )
+
     tz = pytz.timezone('Asia/Yerevan')
     now = datetime.now(tz)
     current_hour = now.hour

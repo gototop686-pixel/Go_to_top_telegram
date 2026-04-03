@@ -12,7 +12,8 @@ from middlewares.i18n import i18n_manager
 from database.crud import (
     get_user, map_message, get_client_msg_id, 
     start_chat_session, end_chat_session,
-    get_active_sessions_count, get_closed_sessions_today
+    get_active_sessions_count, get_closed_sessions_today,
+    get_pending_requests, accept_chat_request
 )
 
 router = Router()
@@ -196,6 +197,47 @@ async def _close_chat_for_client(manager_id: int, user_id: int, bot: Bot, storag
 
 
 # ============================================================
+# SLASH COMMANDS — work ANY time, no active chat needed
+# ============================================================
+
+from aiogram.filters import Command
+
+
+@router.message(Command("dashboard", "panel", "dash"))
+async def cmd_dashboard(message: Message):
+    """Manager can call /dashboard at any time."""
+    if message.from_user.id != config.manager_id:
+        return
+    await show_dashboard(message)
+
+
+@router.message(Command("chats", "list"))
+async def cmd_chats(message: Message, state: FSMContext, bot: Bot):
+    """Manager can call /chats at any time to see open chats."""
+    if message.from_user.id != config.manager_id:
+        return
+    await show_chat_list(message, state, bot)
+
+
+# ============================================================
+# TEXT TRIGGERS — work outside of chat mode too
+# ============================================================
+
+@router.message(F.text == "📊 Панель управления")
+async def text_dashboard(message: Message):
+    if message.from_user.id != config.manager_id:
+        return
+    await show_dashboard(message)
+
+
+@router.message(F.text == "📋 Список чатов")
+async def text_chat_list(message: Message, state: FSMContext, bot: Bot):
+    if message.from_user.id != config.manager_id:
+        return
+    await show_chat_list(message, state, bot)
+
+
+# ============================================================
 # ACCEPT CHAT (manager clicks inline button under lead notification)
 # ============================================================
 
@@ -234,6 +276,9 @@ async def accept_chat_handler(callback: CallbackQuery, state: FSMContext, bot: B
             client_username = username_match.group(1).strip()
 
     chats[user_id] = {"name": client_name, "username": client_username}
+
+    # Mark pending requests as accepted
+    await accept_chat_request(user_id)
 
     # Activate this chat
     name = await _activate_chat(manager_id, user_id, bot, state, state.storage)
@@ -689,4 +734,33 @@ async def process_dashboard_callback(callback: CallbackQuery, bot: Bot):
         await callback.answer()
 
     elif action == "requests":
-        await callback.answer("Все новые запросы приходят в виде уведомлений с кнопкой 'Принять'.", show_alert=True)
+        pending = await get_pending_requests()
+        if not pending:
+            await callback.answer("Нет ожидающих запросов.", show_alert=True)
+            return
+        
+        lines = ["<b>🔔 Ожidающие запросы:</b>\n"]
+        for req in pending[:20]:  # max 20
+            safe_name = (req.user_name or "Клиент").replace("<", "&lt;").replace(">", "&gt;")
+            time_str = req.created_at.strftime("%H:%M") if req.created_at else "?"
+            type_emoji = {"lead": "📋", "manager_request": "🙋", "form_incomplete": "⚠️"}.get(req.request_type, "📩")
+            preview = ""
+            if req.message_preview:
+                preview = f"\n   💬 {req.message_preview[:80]}..."
+            lines.append(f"{type_emoji} {time_str} — {safe_name} (@{req.username or 'N/A'}) [ID: {req.user_id}]{preview}")
+        
+        lines.append(f"\nВсего: {len(pending)}")
+        
+        # Add accept buttons for each pending request
+        buttons = []
+        for req in pending[:10]:
+            safe_name = (req.user_name or "Клиент")[:30]
+            buttons.append([InlineKeyboardButton(
+                text=f"✅ Принять: {safe_name}",
+                callback_data=f"accept_chat:{req.user_id}"
+            )])
+        buttons.append([InlineKeyboardButton(text="🔙 Назad", callback_data="dash:refresh")])
+        kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+        
+        await callback.message.answer("\n".join(lines), reply_markup=kb, parse_mode="HTML")
+        await callback.answer()

@@ -2,7 +2,7 @@ from sqlalchemy import select, update, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, Dict
 
-from .models import User, Interaction, MessageMap, ChatSession, async_session
+from .models import User, Interaction, MessageMap, ChatSession, ChatRequest, async_session
 from datetime import datetime, timedelta
 
 async def get_user_full(user_id: int):
@@ -64,6 +64,44 @@ async def get_closed_sessions_today() -> list:
             .where(ChatSession.ended_at >= today_start)
         )
         return result.all()
+
+async def save_chat_request(user_id: int, user_name: str, username: str,
+                            request_type: str, message_preview: str = ""):
+    """Save a pending chat request when client asks for manager."""
+    async with async_session() as session:
+        req = ChatRequest(
+            user_id=user_id,
+            user_name=user_name,
+            username=username,
+            request_type=request_type,
+            message_preview=message_preview[:500] if message_preview else ""
+        )
+        session.add(req)
+        await session.commit()
+
+
+async def get_pending_requests() -> list:
+    """Get all pending (unaccepted) chat requests."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(ChatRequest)
+            .where(ChatRequest.status == "pending")
+            .order_by(ChatRequest.created_at.desc())
+        )
+        return result.scalars().all()
+
+
+async def accept_chat_request(user_id: int):
+    """Mark chat requests from this user as accepted."""
+    async with async_session() as session:
+        await session.execute(
+            update(ChatRequest)
+            .where(ChatRequest.user_id == user_id)
+            .where(ChatRequest.status == "pending")
+            .values(status="accepted")
+        )
+        await session.commit()
+
 
 async def get_user(user_id: int) -> Optional[Dict]:
     async with async_session() as session:

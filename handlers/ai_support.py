@@ -9,7 +9,7 @@ from aiogram.fsm.context import FSMContext
 
 from states.user_states import SupportMode, ManagerChat
 from services.ai_service import ai_service
-from database.crud import log_interaction
+from database.crud import log_interaction, save_chat_request
 from keyboards.reply import get_main_menu_kb, get_ai_support_kb
 from keyboards.inline import get_manager_accept_kb
 from middlewares.i18n import i18n_manager
@@ -442,6 +442,15 @@ async def process_question(message: Message, i18n, language: str, state: FSMCont
 
 async def notify_manager_contact_request(bot: Bot, user, raw_text: str = ""):
     """Notify manager that client explicitly asked for a live manager."""
+    # Save to DB so dashboard can show it
+    await save_chat_request(
+        user_id=user.id,
+        user_name=user.full_name or "",
+        username=user.username or "",
+        request_type="manager_request",
+        message_preview=raw_text
+    )
+
     msg = (
         f"🙋 КЛИЕНТ ПРОСИТ МЕНЕДЖЕРА\n\n"
         f"👤 Клиент: {user.full_name}\n"
@@ -467,6 +476,14 @@ async def notify_manager_contact_request(bot: Bot, user, raw_text: str = ""):
 
 async def notify_manager_incomplete_form(bot: Bot, user, partial_fields: dict, missing: list, raw_text: str = ""):
     """Notify manager that a client tried to send a form but it's incomplete."""
+    await save_chat_request(
+        user_id=user.id,
+        user_name=user.full_name or "",
+        username=user.username or "",
+        request_type="form_incomplete",
+        message_preview=raw_text
+    )
+
     msg = (
         f"⚠️ НЕПОЛНАЯ ЗАЯВКА\n\n"
         f"👤 Клиент: {user.full_name}\n"
@@ -505,6 +522,14 @@ async def notify_manager_incomplete_form(bot: Bot, user, partial_fields: dict, m
 
 async def notify_manager_lead(bot: Bot, user, lead_data: dict, raw_text: str = ""):
     """Notify manager: new lead, prepare PDF, connect to chat."""
+    await save_chat_request(
+        user_id=user.id,
+        user_name=user.full_name or "",
+        username=user.username or "",
+        request_type="lead",
+        message_preview=raw_text
+    )
+
     msg = (
         f"🆕 НОВАЯ ЗАЯВКА\n\n"
         f"👤 Клиент: {user.full_name}\n"

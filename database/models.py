@@ -50,6 +50,20 @@ class MessageMap(Base):
     client_msg_id = Column(BigInteger)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class ChatRequest(Base):
+    """Pending chat requests from clients (before manager accepts)."""
+    __tablename__ = "chat_requests"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger)
+    user_name = Column(String(255))
+    username = Column(String(255))
+    request_type = Column(String(50))  # 'lead', 'manager_request', 'form_incomplete'
+    message_preview = Column(Text)
+    status = Column(String(50), default="pending")  # pending, accepted, expired
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
     

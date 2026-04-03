@@ -10,6 +10,6 @@ def get_language_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=kb)
 def get_manager_accept_kb(user_id: int) -> InlineKeyboardMarkup:
     kb = [
-        [InlineKeyboardButton(text="💬 Ответить через Бота", callback_data=f"accept_chat:{user_id}")]
+        [InlineKeyboardButton(text="✅ Принять чат", callback_data=f"accept_chat:{user_id}")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
