@@ -127,6 +127,32 @@ async def clear_all_pending_requests():
         await session.commit()
 
 
+
+
+async def full_reset_db():
+    """Clear ALL active sessions, pending requests, and stale data.
+    Called when manager hits 'reset all chats'."""
+    async with async_session() as session:
+        from sqlalchemy import delete, update as sql_update
+        # Close all active sessions
+        await session.execute(
+            sql_update(ChatSession)
+            .where(ChatSession.status == "active")
+            .values(status="closed", ended_at=datetime.utcnow())
+        )
+        # Clear all pending requests
+        await session.execute(
+            delete(ChatRequest)
+            .where(ChatRequest.status == "pending")
+        )
+        # Clean old message maps (older than 24h)
+        cutoff = datetime.utcnow() - timedelta(hours=24)
+        await session.execute(
+            delete(MessageMap)
+            .where(MessageMap.created_at < cutoff)
+        )
+        await session.commit()
+
 async def get_user(user_id: int) -> Optional[Dict]:
     async with async_session() as session:
         result = await session.execute(select(User).where(User.user_id == user_id))

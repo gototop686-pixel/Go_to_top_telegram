@@ -14,7 +14,8 @@ from database.crud import (
     start_chat_session, end_chat_session,
     get_active_sessions_count, get_closed_sessions_today,
     get_pending_requests, accept_chat_request,
-    clear_finished_sessions_today, clear_all_pending_requests
+    clear_finished_sessions_today, clear_all_pending_requests,
+    full_reset_db
 )
 
 router = Router()
@@ -498,55 +499,76 @@ async def forward_chat_message(message: Message, state: FSMContext, bot: Bot):
         lang_flag = "🇦🇲" if client_lang == "am" else "🇷🇺"
         info_text = f"📩 {prefix}{lang_flag} [{client_name} @{username}]"
         
-        # If it's just text, send it normally
+        # If it's just text, send and map for edit sync
         if message.text:
-            await bot.send_message(
+            mgr_msg = await bot.send_message(
                 manager_id,
                 f"{info_text}:\n{message.text}",
                 parse_mode=None
             )
+            # Map: client msg -> manager msg (for edit sync)
+            await map_message(sender_id, message.message_id, manager_id, mgr_msg.message_id)
         else:
             # If it's media, send info text first, then copy the media
             await bot.send_message(manager_id, f"{info_text}:", parse_mode=None)
-            await bot.copy_message(
+            mgr_copy = await bot.copy_message(
                 chat_id=manager_id,
                 from_chat_id=message.chat.id,
                 message_id=message.message_id
             )
+            await map_message(sender_id, message.message_id, manager_id, mgr_copy.message_id)
             
     except Exception as e:
         logging.error(f"Failed to forward to manager: {e}")
 
 
 @router.edited_message(ManagerChat.in_chat)
-async def sync_manager_edit(message: Message, bot: Bot):
-    """Sync manager edits to client."""
-    if message.from_user.id != config.manager_id:
-        return
+async def sync_edit_in_chat(message: Message, bot: Bot):
+    """Sync edits in both directions: manager↔client."""
+    sender_id = message.from_user.id
     
-    cl_msg_id = await get_client_msg_id(message.chat.id, message.message_id)
-    if not cl_msg_id:
-        return
-
-    active_uid = _get_active(message.from_user.id)
-    if not active_uid:
-        return
-
-    try:
-        if message.text:
-            await bot.edit_message_text(
-                text=message.text,
-                chat_id=active_uid,
-                message_id=cl_msg_id
-            )
-        elif message.caption:
-            await bot.edit_message_caption(
-                chat_id=active_uid,
-                message_id=cl_msg_id,
-                caption=message.caption
-            )
-    except Exception as e:
-        logging.error(f"Failed to sync manager edit: {e}")
+    if sender_id == config.manager_id:
+        # Manager edited → update client
+        cl_msg_id = await get_client_msg_id(message.chat.id, message.message_id)
+        if not cl_msg_id:
+            return
+        active_uid = _get_active(sender_id)
+        if not active_uid:
+            return
+        try:
+            if message.text:
+                await bot.edit_message_text(
+                    text=message.text, chat_id=active_uid, message_id=cl_msg_id
+                )
+            elif message.caption:
+                await bot.edit_message_caption(
+                    chat_id=active_uid, message_id=cl_msg_id, caption=message.caption
+                )
+        except Exception as e:
+            logging.error(f"Sync manager→client edit failed: {e}")
+    else:
+        # Client edited → update manager's copy
+        mgr_msg_id = await get_client_msg_id(sender_id, message.message_id)
+        if not mgr_msg_id:
+            return
+        
+        manager_id = config.manager_id
+        client_name = message.from_user.full_name or "Клиент"
+        username = message.from_user.username or "N/A"
+        
+        # Get client language for flag
+        user_data = await get_user(sender_id)
+        client_lang = user_data.get("language", "ru") if user_data else "ru"
+        lang_flag = "🇦🇲" if client_lang == "am" else "🇷🇺"
+        
+        try:
+            if message.text:
+                new_text = f"📩 {lang_flag} [{client_name} @{username}]:\n{message.text}"
+                await bot.edit_message_text(
+                    text=new_text, chat_id=manager_id, message_id=mgr_msg_id
+                )
+        except Exception as e:
+            logging.error(f"Sync client→manager edit failed: {e}")
 
 
 # ============================================================
@@ -842,10 +864,10 @@ async def process_dashboard_callback(callback: CallbackQuery, bot: Bot, state: F
             # End DB session
             await end_chat_session(uid)
         
-        # Clear all in-memory state
+        # Clear all in-memory state + DB cleanup
         open_chats.pop(manager_id, None)
         active_chat.pop(manager_id, None)
-        await clear_all_pending_requests()
+        await full_reset_db()  # Close sessions, clear requests, clean old message maps
         
         # Clear manager FSM
         await state.clear()

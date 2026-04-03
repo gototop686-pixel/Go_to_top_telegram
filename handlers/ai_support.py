@@ -9,7 +9,7 @@ from aiogram.fsm.context import FSMContext
 
 from states.user_states import SupportMode, ManagerChat
 from services.ai_service import ai_service
-from database.crud import log_interaction, save_chat_request
+from database.crud import log_interaction, save_chat_request, get_user as get_user_data
 from keyboards.reply import get_main_menu_kb, get_ai_support_kb
 from keyboards.inline import get_manager_accept_kb
 from middlewares.i18n import i18n_manager
@@ -451,8 +451,12 @@ async def notify_manager_contact_request(bot: Bot, user, raw_text: str = ""):
         message_preview=raw_text
     )
 
+    # Get user language for flag
+    _udata = await get_user_data(user.id)
+    _ulang = _udata.get("language", "ru") if _udata else "ru"
+    _flag = "🇦🇲" if _ulang == "am" else "🇷🇺"
     msg = (
-        f"🙋 КЛИЕНТ ПРОСИТ МЕНЕДЖЕРА\n\n"
+        f"🙋 {_flag} КЛИЕНТ ПРОСИТ МЕНЕДЖЕРА\n\n"
         f"👤 Клиент: {user.full_name}\n"
         f"📱 Telegram: @{user.username or 'нет username'}\n"
         f"🆔 ID: {user.id}\n\n"
@@ -484,8 +488,11 @@ async def notify_manager_incomplete_form(bot: Bot, user, partial_fields: dict, m
         message_preview=raw_text
     )
 
+    _udata2 = await get_user_data(user.id)
+    _ulang2 = _udata2.get("language", "ru") if _udata2 else "ru"
+    _flag2 = "🇦🇲" if _ulang2 == "am" else "🇷🇺"
     msg = (
-        f"⚠️ НЕПОЛНАЯ ЗАЯВКА\n\n"
+        f"⚠️ {_flag2} НЕПОЛНАЯ ЗАЯВКА\n\n"
         f"👤 Клиент: {user.full_name}\n"
         f"📱 Telegram: @{user.username or 'нет username'}\n"
         f"🆔 ID: {user.id}\n\n"
@@ -530,8 +537,11 @@ async def notify_manager_lead(bot: Bot, user, lead_data: dict, raw_text: str = "
         message_preview=raw_text
     )
 
+    _udata3 = await get_user_data(user.id)
+    _ulang3 = _udata3.get("language", "ru") if _udata3 else "ru"
+    _flag3 = "🇦🇲" if _ulang3 == "am" else "🇷🇺"
     msg = (
-        f"🆕 НОВАЯ ЗАЯВКА\n\n"
+        f"🆕 {_flag3} НОВАЯ ЗАЯВКА\n\n"
         f"👤 Клиент: {user.full_name}\n"
         f"📱 Telegram: @{user.username or 'нет username'}\n"
         f"🆔 ID: {user.id}\n\n"

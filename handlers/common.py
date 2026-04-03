@@ -10,7 +10,7 @@ from config.config import config
 from keyboards.reply import get_main_menu_kb, get_language_kb
 from keyboards.inline import get_manager_accept_kb
 from services.ai_service import ai_service
-from database.crud import save_user, update_user_language, log_interaction, save_chat_request
+from database.crud import save_user, update_user_language, log_interaction, save_chat_request, get_user as get_user_data
 from middlewares.i18n import i18n_manager
 
 router = Router()
@@ -177,8 +177,13 @@ async def notify_manager_about_attempt(bot: Bot, user: types.User, context: str 
     is_working = config.work_start_hour <= current_hour < config.work_end_hour
     prefix = "\u23f0 (\u0420\u0410\u0411\u041e\u0427\u0415\u0415 \u0412\u0420\u0415\u041c\u042f)" if is_working else "\U0001f319 (\u0412\u041d\u0415\u0420\u0410\u0411\u041e\u0427\u0415\u0415 \u0412\u0420\u0415\u041c\u042f)"
     
+    # Get user language for flag
+    _ud = await get_user_data(user.id)
+    _ul = _ud.get("language", "ru") if _ud else "ru"
+    _fl = "\U0001f1e6\U0001f1f2" if _ul == "am" else "\U0001f1f7\U0001f1fa"
+    
     msg = (
-        f"{prefix} \U0001f64b \u041a\u043b\u0438\u0435\u043d\u0442 \u043f\u0440\u043e\u0441\u0438\u0442 \u0441\u0432\u044f\u0437\u0430\u0442\u044c\u0441\u044f!\n\n"
+        f"{prefix} {_fl} \U0001f64b \u041a\u043b\u0438\u0435\u043d\u0442 \u043f\u0440\u043e\u0441\u0438\u0442 \u0441\u0432\u044f\u0437\u0430\u0442\u044c\u0441\u044f!\n\n"
         f"\u0418\u043c\u044f: {user.full_name}\n"
         f"Username: @{user.username or 'N/A'}\n"
         f"ID: {user.id}\n"
