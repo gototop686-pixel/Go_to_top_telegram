@@ -59,6 +59,66 @@ FORM_TRIGGER_WORDS = [
 FORM_FIELD_WORDS = ["Имя:", "Артикул", "Ключевые слова:", "Количество выкупов"]
 
 
+# ============================================================
+# MANAGER REQUEST DETECTION (client wants live manager)
+# ============================================================
+
+MANAGER_TRIGGER_PHRASES = [
+    # Russian — direct requests
+    "хочу с менеджером", "дайте менеджера", "позовите менеджера",
+    "мне нужен менеджер", "свяжите с менеджером", "переключите на менеджера",
+    "хочу общаться с менеджером", "хочу поговорить с менеджером",
+    "соедините с менеджером", "можно менеджера", "где менеджер",
+    "нужен менеджер", "вызовите менеджера", "подключите менеджера",
+    "перевести на менеджера", "переведите на менеджера",
+    "хочу с человеком", "дайте человека", "хочу поговорить с человеком",
+    "мне нужен человек", "свяжите с человеком", "переключите на человека",
+    "хочу общаться с человеком", "соедините с человеком",
+    # Russian — indirect / colloquial
+    "живой чат", "живой оператор", "живой человек",
+    "хочу живого", "дайте живого",
+    "не хочу с ботом", "не хочу с роботом",
+    "хватит бота", "надоел бот", "бот не помогает",
+    "хочу с оператором", "дайте оператора", "нужен оператор",
+    "можно с оператором", "переключите на оператора",
+    "хочу с консультантом", "нужен консультант",
+    "хочу связаться с менеджером", "как связаться с менеджером",
+    "менеджер нужен", "оператор нужен",
+    "позвать менеджера", "позвать человека",
+    # Armenian (transliterated / mixed)
+    "մenedjer", "менеджер петк э",
+    "менеджери хет", "менеджерин асек",
+]
+
+# Compiled patterns for more flexible matching
+MANAGER_TRIGGER_PATTERNS = [
+    r"менеджер\w*",           # менеджер, менеджера, менеджером, менеджеру
+    r"оператор\w*",           # оператор, оператора
+    r"консультант\w*",        # консультант, консультанта
+    r"живо[йего]\s+(?:чат|оператор|человек|менеджер)",
+    r"(?:хочу|нужен|дайте|можно|позовите|переключите|свяжите|соедините|подключите)\s+.*?(?:менеджер|человек|оператор|консультант)",
+    r"(?:не\s+хочу|хватит|надоел)\s+.*?(?:бот|робот)",
+    r"(?:поговорить|общаться|связаться|пообщаться)\s+.*?(?:менеджер|человек|оператор|консультант)",
+]
+
+
+def wants_manager(text: str) -> bool:
+    """Check if client wants to talk to a live manager."""
+    text_lower = text.lower().strip()
+
+    # Direct phrase match
+    for phrase in MANAGER_TRIGGER_PHRASES:
+        if phrase in text_lower:
+            return True
+
+    # Regex pattern match (more flexible word order / forms)
+    for pattern in MANAGER_TRIGGER_PATTERNS:
+        if re.search(pattern, text_lower):
+            return True
+
+    return False
+
+
 def ai_wants_form(text: str) -> bool:
     """Check if AI response is trying to send a data collection form."""
     text_lower = text.lower()
@@ -326,6 +386,18 @@ async def process_question(message: Message, i18n, language: str, state: FSMCont
 
     user_id = message.from_user.id
 
+    # CHECK 0: Does client want to talk to a manager? (text triggers)
+    if wants_manager(message.text):
+        logging.info(f"Manager request detected from user {user_id}: {message.text[:80]}")
+        await send_safe(
+            message,
+            "Передаю ваш запрос менеджеру 👋\nОн свяжется с вами в ближайшее время!",
+            reply_markup=get_ai_support_kb(i18n)
+        )
+        await notify_manager_contact_request(bot, message.from_user, message.text)
+        await log_interaction(user_id, 'ai', 'manager_request', message.text, "Manager request forwarded")
+        return
+
     # CHECK 1: Is this a FULLY filled form from client? (3+ filled fields)
     filled = detect_filled_form(message.text)
     if filled:
@@ -374,6 +446,31 @@ async def process_question(message: Message, i18n, language: str, state: FSMCont
     # If AI tagged lead data — also notify manager
     if lead_data:
         await notify_manager_lead(bot, message.from_user, lead_data, message.text)
+
+
+async def notify_manager_contact_request(bot: Bot, user, raw_text: str = ""):
+    """Notify manager that client explicitly asked for a live manager."""
+    msg = (
+        f"🙋 КЛИЕНТ ПРОСИТ МЕНЕДЖЕРА\n\n"
+        f"👤 Клиент: {user.full_name}\n"
+        f"📱 Telegram: @{user.username or 'нет username'}\n"
+        f"🆔 ID: {user.id}\n\n"
+    )
+
+    if raw_text:
+        msg += f"💬 Сообщение: {raw_text[:500]}\n\n"
+
+    msg += "Клиент хочет общаться с менеджером напрямую."
+
+    try:
+        await bot.send_message(
+            config.manager_id,
+            msg,
+            reply_markup=get_manager_accept_kb(user.id)
+        )
+        logging.info(f"Manager notified about contact request from user {user.id}")
+    except Exception as e:
+        logging.error(f"Failed to notify manager about contact request: {e}")
 
 
 async def notify_manager_incomplete_form(bot: Bot, user, partial_fields: dict, missing: list, raw_text: str = ""):
