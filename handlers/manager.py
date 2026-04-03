@@ -106,7 +106,10 @@ def _load_menu_buttons():
     btn_keys = [
         "btn_new_client", "btn_existing_client", "btn_ask_question",
         "btn_contact_manager", "btn_calc_on_site", "btn_back_to_menu",
-        "btn_check_status",
+        "btn_check_status", "btn_faq", "btn_price_list", "btn_how_to_order",
+        "btn_about_us", "btn_change_language",
+        "btn_price_main", "btn_price_reviews", "btn_price_photo_video",
+        "btn_price_fulfillment", "btn_price_delivery",
     ]
     for lang in ("ru", "am"):
         for key in btn_keys:
@@ -197,10 +200,32 @@ async def _close_chat_for_client(manager_id: int, user_id: int, bot: Bot, storag
 
 
 # ============================================================
-# SLASH COMMANDS — work ANY time, no active chat needed
+# STALE BUTTONS — catch client pressing "end chat" after manager already ended it
 # ============================================================
 
 from aiogram.filters import Command
+
+
+@router.message(F.text.in_(["❌ Завершить чат", "❌ Завершить диалог / Ավարտել", "Завершить чат", "Завершить диалог"]))
+async def stale_end_chat_button(message: Message, i18n, state: FSMContext):
+    """Client presses 'end chat' but chat was already ended by manager.
+    FSM state is None, so ManagerChat.in_chat handler doesn't catch it.
+    Just clear state and show normal menu."""
+    current = await state.get_state()
+    if current == ManagerChat.in_chat.state:
+        return  # Let the in_chat handler deal with it
+    # Not in chat anymore — just show menu
+    await state.clear()
+    await message.answer(
+        i18n("main_menu"),
+        reply_markup=get_main_menu_kb(i18n),
+        parse_mode=None
+    )
+
+
+# ============================================================
+# SLASH COMMANDS — work ANY time, no active chat needed
+# ============================================================
 
 
 @router.message(Command("dashboard", "panel", "dash"))

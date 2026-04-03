@@ -88,7 +88,7 @@ async def show_how_to_order(message: Message, i18n):
 
 
 # ============================================================
-# ABOUT US button
+# ABOUT US button — with logo + HTML links
 # ============================================================
 
 @router.message(F.text.in_([
@@ -96,7 +96,32 @@ async def show_how_to_order(message: Message, i18n):
     i18n_manager.get("btn_about_us", "am")
 ]))
 async def show_about_us(message: Message, i18n):
+    import os
+    from aiogram.types import FSInputFile
+
+    # Send logo first
+    logo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "logo.jpg")
+    if os.path.exists(logo_path):
+        try:
+            photo = FSInputFile(logo_path)
+            await message.answer_photo(photo)
+        except Exception as e:
+            logging.error(f"Failed to send logo: {e}")
+
+    # Send about text (plain, no parse_mode issues)
     await message.answer(i18n("about_us_msg"), reply_markup=get_main_menu_kb(i18n), parse_mode=None)
+
+    # Send social links as HTML (clickable, no visible URLs)
+    links = i18n("about_us_links")
+    if links and links != "about_us_links":
+        try:
+            await message.answer(
+                f"📱 {links}",
+                parse_mode="HTML",
+                disable_web_page_preview=True
+            )
+        except Exception as e:
+            logging.error(f"Failed to send social links: {e}")
 
 
 # ============================================================
