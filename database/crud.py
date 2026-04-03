@@ -30,6 +30,17 @@ async def get_client_msg_id(m_chat_id: int, m_msg_id: int) -> Optional[int]:
         )
         return result.scalar()
 
+async def has_active_session(user_id: int) -> bool:
+    """Check if this user already has an active chat session."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(ChatSession)
+            .where(ChatSession.user_id == user_id)
+            .where(ChatSession.status == "active")
+        )
+        return result.first() is not None
+
+
 async def start_chat_session(user_id: int, manager_id: int):
     async with async_session() as session:
         new_session = ChatSession(user_id=user_id, manager_id=manager_id)
@@ -127,6 +138,73 @@ async def clear_all_pending_requests():
         await session.commit()
 
 
+
+
+async def purge_all_transient_data() -> int:
+    """FULL cleanup: delete ALL transient data (sessions, requests, maps, logs).
+    Keeps only Users table. Used by /cleandb command."""
+    total = 0
+    async with async_session() as session:
+        from sqlalchemy import delete
+        for model in [ChatSession, ChatRequest, MessageMap, Interaction]:
+            result = await session.execute(delete(model))
+            total += result.rowcount
+        await session.commit()
+    return total
+
+
+async def garbage_collect_db(days: int = 30) -> int:
+    """Auto garbage collector: delete data older than N days.
+    Runs automatically every 24 hours.
+    - Closed chat sessions older than N days
+    - Accepted/expired chat requests older than N days
+    - Message maps older than N days
+    - Interaction logs older than N days
+    Returns total number of deleted records."""
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    total = 0
+    async with async_session() as session:
+        from sqlalchemy import delete, func
+        
+        # 1. Old closed sessions
+        result = await session.execute(
+            delete(ChatSession)
+            .where(ChatSession.ended_at < cutoff)
+            .where(ChatSession.status == "closed")
+        )
+        total += result.rowcount
+        
+        # 2. Stale active sessions (older than N days — definitely orphaned)
+        result = await session.execute(
+            delete(ChatSession)
+            .where(ChatSession.started_at < cutoff)
+            .where(ChatSession.status == "active")
+        )
+        total += result.rowcount
+        
+        # 3. Old chat requests (accepted/expired)
+        result = await session.execute(
+            delete(ChatRequest)
+            .where(ChatRequest.created_at < cutoff)
+        )
+        total += result.rowcount
+        
+        # 4. Old message maps
+        result = await session.execute(
+            delete(MessageMap)
+            .where(MessageMap.created_at < cutoff)
+        )
+        total += result.rowcount
+        
+        # 5. Old interaction logs
+        result = await session.execute(
+            delete(Interaction)
+            .where(Interaction.created_at < cutoff)
+        )
+        total += result.rowcount
+        
+        await session.commit()
+    return total
 
 
 async def full_reset_db():

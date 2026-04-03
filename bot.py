@@ -10,6 +10,7 @@ from config.config import config
 from database.models import init_db
 from middlewares.i18n import I18nMiddleware
 from handlers import common, ai_support, sales_funnel, manager, faq, prices
+from database.crud import garbage_collect_db
 
 
 async def handle_ping(request):
@@ -60,6 +61,19 @@ async def main():
     # Clean start: delete old webhook
     await bot.delete_webhook(drop_pending_updates=True)
     logging.info("Starting polling...")
+
+    # Start garbage collector (runs every 24h, cleans data older than 30 days)
+    async def gc_loop():
+        while True:
+            try:
+                deleted = await garbage_collect_db(days=30)
+                logging.info(f"GC: cleaned {deleted} old records")
+            except Exception as e:
+                logging.error(f"GC error: {e}")
+            await asyncio.sleep(86400)  # 24 hours
+
+    asyncio.create_task(gc_loop())
+    logging.info("Garbage collector started (30-day retention)")
 
     await dp.start_polling(bot)
 

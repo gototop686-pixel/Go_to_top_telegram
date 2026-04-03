@@ -11,7 +11,7 @@ from aiogram.fsm.storage.base import StorageKey
 from middlewares.i18n import i18n_manager
 from database.crud import (
     get_user, map_message, get_client_msg_id, 
-    start_chat_session, end_chat_session,
+    has_active_session, start_chat_session, end_chat_session,
     get_active_sessions_count, get_closed_sessions_today,
     get_pending_requests, accept_chat_request,
     clear_finished_sessions_today, clear_all_pending_requests,
@@ -157,8 +157,9 @@ async def _activate_chat(manager_id: int, user_id: int, bot: Bot, state: FSMCont
     await user_ctx.set_state(ManagerChat.in_chat)
     await user_ctx.update_data(connected_manager_id=manager_id)
 
-    # Database: Start session
-    await start_chat_session(user_id, manager_id)
+    # Database: Start session ONLY if no active session exists for this user
+    if not await has_active_session(user_id):
+        await start_chat_session(user_id, manager_id)
 
     return name
 
@@ -209,6 +210,32 @@ async def _close_chat_for_client(manager_id: int, user_id: int, bot: Bot, storag
 # ============================================================
 
 from aiogram.filters import Command
+
+
+@router.message(Command("cleandb"))
+async def cmd_cleandb(message: Message):
+    """Manager command: full DB cleanup — delete ALL sessions, requests, maps, logs."""
+    if message.from_user.id != config.manager_id:
+        return
+    
+    from database.crud import purge_all_transient_data
+    deleted = await purge_all_transient_data()
+    
+    # Also clear in-memory state
+    open_chats.clear()
+    active_chat.clear()
+    
+    await message.answer(
+        f"🧹 База данных полностью очищена!\n\n"
+        f"Удалено записей: {deleted}\n"
+        f"• Все сессии чатов\n"
+        f"• Все запросы на чат\n"
+        f"• Все маппинги сообщений\n"
+        f"• Все логи взаимодействий\n\n"
+        f"✅ Пользователи (users) сохранены.\n"
+        f"Бот работает с чистого листа.",
+        parse_mode=None
+    )
 
 
 @router.message(Command("dashboard", "panel", "dash"))
