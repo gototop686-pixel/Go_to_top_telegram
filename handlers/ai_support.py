@@ -367,14 +367,6 @@ async def process_question(message: Message, i18n, language: str, state: FSMCont
         await send_safe(message, i18n("main_menu"), reply_markup=get_main_menu_kb(i18n))
         return
 
-    # Calculate on site
-    if message.text in [
-        i18n_manager.get("btn_calc_on_site", "ru"),
-        i18n_manager.get("btn_calc_on_site", "am")
-    ]:
-        await send_safe(message, i18n("calc_on_site_msg"), reply_markup=get_ai_support_kb(i18n))
-        return
-
     # Contact manager
     if message.text in [
         i18n_manager.get("btn_contact_manager", "ru"),

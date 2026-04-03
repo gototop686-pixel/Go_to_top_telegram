@@ -9,7 +9,7 @@ from aiogram.client.default import DefaultBotProperties
 from config.config import config
 from database.models import init_db
 from middlewares.i18n import I18nMiddleware
-from handlers import common, ai_support, sales_funnel, manager
+from handlers import common, ai_support, sales_funnel, manager, faq
 
 
 async def handle_ping(request):
@@ -30,9 +30,12 @@ async def main():
     dp.callback_query.middleware(I18nMiddleware())
 
     # Order matters: manager first (handles ManagerChat state),
-    # then common (/start, language), then AI, then funnel
+    # then common (/start, language, menu buttons),
+    # then FAQ (static Armenian + AI redirect for Russian),
+    # then AI support, then funnel
     dp.include_router(manager.router)
     dp.include_router(common.router)
+    dp.include_router(faq.router)
     dp.include_router(ai_support.router)
     dp.include_router(sales_funnel.router)
 
