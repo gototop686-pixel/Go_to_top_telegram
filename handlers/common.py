@@ -99,29 +99,39 @@ async def show_about_us(message: Message, i18n):
     import os
     from aiogram.types import FSInputFile
 
-    # Send logo first
+    import html as html_lib
+    about_text = html_lib.escape(i18n("about_us_msg"))
+    links = i18n("about_us_links")  # Already HTML, don't escape
+    
+    # Build combined caption: escaped text + raw HTML links
+    if links and links != "about_us_links":
+        caption = f"{about_text}\n\n📱 {links}"
+    else:
+        caption = about_text
+
+    # Send as ONE message: photo + caption
     logo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "logo.jpg")
     if os.path.exists(logo_path):
         try:
             photo = FSInputFile(logo_path)
-            await message.answer_photo(photo)
+            # Telegram caption limit is 1024 chars
+            if len(caption) <= 1024:
+                await message.answer_photo(
+                    photo,
+                    caption=caption,
+                    reply_markup=get_main_menu_kb(i18n),
+                    parse_mode="HTML"
+                )
+            else:
+                # Too long for caption — send photo then text
+                await message.answer_photo(photo)
+                await message.answer(caption, reply_markup=get_main_menu_kb(i18n), parse_mode="HTML")
+            return
         except Exception as e:
-            logging.error(f"Failed to send logo: {e}")
+            logging.error(f"Failed to send about us with photo: {e}")
 
-    # Send about text (plain, no parse_mode issues)
-    await message.answer(i18n("about_us_msg"), reply_markup=get_main_menu_kb(i18n), parse_mode=None)
-
-    # Send social links as HTML (clickable, no visible URLs)
-    links = i18n("about_us_links")
-    if links and links != "about_us_links":
-        try:
-            await message.answer(
-                f"📱 {links}",
-                parse_mode="HTML",
-                disable_web_page_preview=True
-            )
-        except Exception as e:
-            logging.error(f"Failed to send social links: {e}")
+    # Fallback: text only
+    await message.answer(caption, reply_markup=get_main_menu_kb(i18n), parse_mode="HTML")
 
 
 # ============================================================

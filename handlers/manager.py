@@ -44,10 +44,11 @@ def _set_active(mgr: int, uid: int | None):
 # KEYBOARDS
 # ============================================================
 
-def get_client_chat_kb() -> ReplyKeyboardMarkup:
+def get_client_chat_kb(language: str = "ru") -> ReplyKeyboardMarkup:
     """Minimal keyboard for CLIENT while in chat with manager.
-    Only 'end chat' button — no menu, no other actions."""
-    kb = [[KeyboardButton(text="❌ Завершить чат")]]
+    Only 'end chat' button — in client's language."""
+    btn_text = i18n_manager.get("btn_end_chat", language)
+    kb = [[KeyboardButton(text=btn_text)]]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, one_time_keyboard=False)
 
 
@@ -113,6 +114,7 @@ def _load_menu_buttons():
         "btn_price_main", "btn_price_reviews", "btn_price_photo_video",
         "btn_price_fulfillment", "btn_price_delivery",
     ]
+    # Note: btn_end_chat is NOT blocked — it needs to be processed as exit command
     for lang in ("ru", "am"):
         for key in btn_keys:
             text = i18n_manager.get(key, lang)
@@ -184,9 +186,9 @@ async def _close_chat_for_client(manager_id: int, user_id: int, bot: Bot, storag
         user_i18n = get_i18n_for_user(user_lang)
 
         if ended_by == "manager":
-            text = "Менеджер завершил диалог. Если будут вопросы — я всегда на связи! 🎯"
+            text = user_i18n("chat_end_by_manager")
         else:
-            text = "Вы вышли из чата с менеджером. Если будут вопросы — я всегда на связи! 🎯"
+            text = user_i18n("chat_end_by_client")
 
         try:
             await bot.send_message(
@@ -294,7 +296,12 @@ async def accept_chat_handler(callback: CallbackQuery, state: FSMContext, bot: B
     if not client_name:
         client_name = f"Клиент {user_id}"
 
-    chats[user_id] = {"name": client_name, "username": client_username}
+    # Get client's language for localized messages
+    user_data = await get_user(user_id)
+    user_lang = user_data.get("language", "ru") if user_data else "ru"
+    user_i18n = get_i18n_for_user(user_lang)
+
+    chats[user_id] = {"name": client_name, "username": client_username, "lang": user_lang}
 
     # Mark pending requests as accepted
     await accept_chat_request(user_id)
@@ -331,8 +338,8 @@ async def accept_chat_handler(callback: CallbackQuery, state: FSMContext, bot: B
     try:
         await bot.send_message(
             user_id,
-            "Менеджер подключился к чату! 👋\nСейчас с вами общается наш специалист.\n\nДля завершения нажмите кнопку ниже.",
-            reply_markup=get_client_chat_kb(),
+            user_i18n("chat_manager_connected"),
+            reply_markup=get_client_chat_kb(user_lang),
             parse_mode=None
         )
     except Exception as e:
@@ -377,7 +384,8 @@ async def forward_chat_message(message: Message, state: FSMContext, bot: Bot):
     # ---- EXIT COMMANDS (both manager and client) ----
     exit_cmds = [
         "❌ Завершить диалог / Ավարտել",  # manager button
-        "❌ Завершить чат",                 # client button
+        i18n_manager.get("btn_end_chat", "ru"),  # ❌ Завершить чат
+        i18n_manager.get("btn_end_chat", "am"),  # ❌ Ավարտել զрuycin
         "Завершить диалог",
         "Завершить чат",
         "Ավարտել",
@@ -461,12 +469,15 @@ async def forward_chat_message(message: Message, state: FSMContext, bot: Bot):
 
     # ---- CLIENT SENDING MESSAGE ----
 
+    # Get client language
+    client_user_data = await get_user(sender_id)
+    client_lang = client_user_data.get("language", "ru") if client_user_data else "ru"
+
     # Block menu button presses — don't forward to manager
     if text in CLIENT_MENU_BUTTONS:
         await message.answer(
-            "Сейчас вы в чате с менеджером.\n"
-            "Чтобы вернуться в меню, сначала завершите чат 👇",
-            reply_markup=get_client_chat_kb(),
+            i18n_manager.get("chat_in_progress", client_lang),
+            reply_markup=get_client_chat_kb(client_lang),
             parse_mode=None
         )
         return
@@ -484,7 +495,8 @@ async def forward_chat_message(message: Message, state: FSMContext, bot: Bot):
 
     try:
         # First send who it's from if it's media or has no text
-        info_text = f"📩 {prefix}[{client_name} @{username}]"
+        lang_flag = "🇦🇲" if client_lang == "am" else "🇷🇺"
+        info_text = f"📩 {prefix}{lang_flag} [{client_name} @{username}]"
         
         # If it's just text, send it normally
         if message.text:
@@ -620,7 +632,7 @@ async def end_chat_by_client(message: Message, state: FSMContext, bot: Bot):
     user_i18n = get_i18n_for_user(user_lang)
 
     await message.answer(
-        "Вы вышли из чата с менеджером.\nЕсли будут вопросы — я всегда на связи! 🎯",
+        user_i18n("chat_end_by_client"),
         reply_markup=get_main_menu_kb(user_i18n),
         parse_mode=None
     )
@@ -703,7 +715,7 @@ async def show_dashboard(message: Message):
 
 
 @router.callback_query(F.data.startswith("dash:"))
-async def process_dashboard_callback(callback: CallbackQuery, bot: Bot):
+async def process_dashboard_callback(callback: CallbackQuery, bot: Bot, state: FSMContext):
     action = callback.data.split(":")[1]
     
     if action == "refresh":
@@ -804,27 +816,28 @@ async def process_dashboard_callback(callback: CallbackQuery, bot: Bot):
 
         count = len(chats)
         
-        # Close each chat — notify clients
+        # Close each chat — clear FSM + notify clients
         for uid in list(chats.keys()):
+            # Clear client FSM
             try:
-                # Clear client FSM
-                user_ctx = await get_user_fsm(bot, bot.session, uid)
-            except Exception:
-                pass
+                user_ctx = await get_user_fsm(bot, state.storage, uid)
+                await user_ctx.clear()
+            except Exception as e:
+                logging.warning(f"Failed to clear FSM for user {uid}: {e}")
             
-            # Notify client
+            # Notify client in their language with normal menu
             user_data = await get_user(uid)
             user_lang = user_data.get("language", "ru") if user_data else "ru"
             user_i18n = get_i18n_for_user(user_lang)
             try:
                 await bot.send_message(
                     uid,
-                    "Менеджер завершил диалог. Если будут вопросы — я всегда на связи! 🎯",
+                    user_i18n("chat_end_by_manager"),
                     reply_markup=get_main_menu_kb(user_i18n),
                     parse_mode=None
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logging.warning(f"Failed to notify user {uid}: {e}")
             
             # End DB session
             await end_chat_session(uid)
@@ -833,6 +846,9 @@ async def process_dashboard_callback(callback: CallbackQuery, bot: Bot):
         open_chats.pop(manager_id, None)
         active_chat.pop(manager_id, None)
         await clear_all_pending_requests()
+        
+        # Clear manager FSM
+        await state.clear()
         
         manager_i18n = get_i18n_for_user("ru")
         await callback.message.answer(
@@ -870,7 +886,9 @@ async def process_dashboard_callback(callback: CallbackQuery, bot: Bot):
     "❌ Завершить диалог / Ավարտել",
     "Завершить чат",
     "Завершить диалог",
-    "Ավարտել",
+    " Delays",
+    i18n_manager.get("btn_end_chat", "ru"),
+    i18n_manager.get("btn_end_chat", "am"),
 ]))
 async def stale_end_chat_button(message: Message, i18n, state: FSMContext):
     """Catch exit button presses when user is NOT in ManagerChat.in_chat state.
