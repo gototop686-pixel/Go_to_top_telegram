@@ -9,7 +9,7 @@ from aiogram.client.default import DefaultBotProperties
 from config.config import config
 from database.models import init_db
 from middlewares.i18n import I18nMiddleware
-from handlers import common, ai_support, sales_funnel, manager, faq
+from handlers import common, ai_support, sales_funnel, manager, faq, prices
 
 
 async def handle_ping(request):
@@ -38,6 +38,7 @@ async def main():
     dp.include_router(faq.router)
     dp.include_router(ai_support.router)
     dp.include_router(sales_funnel.router)
+    dp.include_router(prices.router)
 
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 

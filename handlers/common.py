@@ -72,16 +72,7 @@ async def change_language(message: Message, state: FSMContext):
     )
 
 
-# ============================================================
-# PRICE LIST button
-# ============================================================
-
-@router.message(F.text.in_([
-    i18n_manager.get("btn_price_list", "ru"),
-    i18n_manager.get("btn_price_list", "am")
-]))
-async def show_price_list(message: Message, i18n):
-    await message.answer(i18n("price_list_msg"), reply_markup=get_main_menu_kb(i18n), parse_mode=None)
+# show_price_list was moved to handlers/prices.py
 
 
 # ============================================================
