@@ -1,4 +1,5 @@
 import logging
+import re
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -15,15 +16,6 @@ router = Router()
 
 # ============================================================
 # MULTI-CHAT SYSTEM
-# ============================================================
-# manager can talk to multiple clients simultaneously.
-# "active" chat = the one messages are routed to right now.
-# Other chats stay "open" (paused) — client messages still arrive,
-# manager can switch back at any time.
-#
-# Data structures (in-memory, per manager):
-#   open_chats[manager_id] = {user_id: {"name": ..., "username": ...}, ...}
-#   active_chat[manager_id] = user_id | None
 # ============================================================
 
 open_chats: dict[int, dict[int, dict]] = {}   # manager -> {user_id -> info}
@@ -46,14 +38,20 @@ def _set_active(mgr: int, uid: int | None):
 # KEYBOARDS
 # ============================================================
 
+def get_client_chat_kb() -> ReplyKeyboardMarkup:
+    """Minimal keyboard for CLIENT while in chat with manager.
+    Only 'end chat' button — no menu, no other actions."""
+    kb = [[KeyboardButton(text="❌ Завершить чат")]]
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True, one_time_keyboard=False)
+
+
 def get_manager_chat_kb(manager_id: int) -> ReplyKeyboardMarkup:
-    """Dynamic keyboard showing open chats + controls."""
+    """Dynamic keyboard for MANAGER showing open chats + controls."""
     chats = _get_open(manager_id)
     active = _get_active(manager_id)
     rows = []
 
     if len(chats) > 1:
-        # Switch buttons for each non-active chat
         for uid, info in chats.items():
             if uid == active:
                 continue
@@ -66,7 +64,6 @@ def get_manager_chat_kb(manager_id: int) -> ReplyKeyboardMarkup:
 
 
 def get_switch_inline_kb(manager_id: int) -> InlineKeyboardMarkup | None:
-    """Inline keyboard to switch to a specific chat (used in notifications)."""
     chats = _get_open(manager_id)
     if not chats:
         return None
@@ -78,6 +75,29 @@ def get_switch_inline_kb(manager_id: int) -> InlineKeyboardMarkup | None:
             callback_data=f"switch_chat:{uid}"
         )])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+# ============================================================
+# CLIENT MENU BUTTONS (to intercept during chat)
+# ============================================================
+
+# All possible menu button texts that client might press (both languages)
+CLIENT_MENU_BUTTONS = set()
+
+def _load_menu_buttons():
+    """Load all menu button texts from locales so we can block them during chat."""
+    btn_keys = [
+        "btn_new_client", "btn_existing_client", "btn_ask_question",
+        "btn_contact_manager", "btn_calc_on_site", "btn_back_to_menu",
+        "btn_check_status",
+    ]
+    for lang in ("ru", "am"):
+        for key in btn_keys:
+            text = i18n_manager.get(key, lang)
+            if text:
+                CLIENT_MENU_BUTTONS.add(text)
+
+_load_menu_buttons()
 
 
 # ============================================================
@@ -96,7 +116,7 @@ async def get_user_fsm(bot: Bot, storage, user_id: int) -> FSMContext:
 
 
 async def _activate_chat(manager_id: int, user_id: int, bot: Bot, state: FSMContext, storage):
-    """Make a chat active: set FSM states, update tracking, send keyboard."""
+    """Make a chat active: set FSM states, update tracking."""
     chats = _get_open(manager_id)
     info = chats.get(user_id, {})
     name = info.get("name", str(user_id))
@@ -107,7 +127,7 @@ async def _activate_chat(manager_id: int, user_id: int, bot: Bot, state: FSMCont
     await state.set_state(ManagerChat.in_chat)
     await state.update_data(active_user_id=user_id)
 
-    # Set user FSM
+    # Set user FSM — give them the minimal chat keyboard
     user_ctx = await get_user_fsm(bot, storage, user_id)
     await user_ctx.set_state(ManagerChat.in_chat)
     await user_ctx.update_data(connected_manager_id=manager_id)
@@ -115,13 +135,13 @@ async def _activate_chat(manager_id: int, user_id: int, bot: Bot, state: FSMCont
     return name
 
 
-async def _close_chat(manager_id: int, user_id: int, bot: Bot, state: FSMContext, storage):
-    """Close one chat, notify client, clean up."""
+async def _close_chat_for_client(manager_id: int, user_id: int, bot: Bot, storage,
+                                  notify_client: bool = True, ended_by: str = "manager"):
+    """Close one chat: clean user FSM, notify client, remove from tracking."""
     chats = _get_open(manager_id)
     info = chats.pop(user_id, {})
     name = info.get("name", str(user_id))
 
-    # If this was the active chat, clear active
     if _get_active(manager_id) == user_id:
         _set_active(manager_id, None)
 
@@ -129,20 +149,26 @@ async def _close_chat(manager_id: int, user_id: int, bot: Bot, state: FSMContext
     user_ctx = await get_user_fsm(bot, storage, user_id)
     await user_ctx.clear()
 
-    # Notify user
-    user_data = await get_user(user_id)
-    user_lang = user_data.get("language", "ru") if user_data else "ru"
-    user_i18n = get_i18n_for_user(user_lang)
+    # Restore normal menu for client
+    if notify_client:
+        user_data = await get_user(user_id)
+        user_lang = user_data.get("language", "ru") if user_data else "ru"
+        user_i18n = get_i18n_for_user(user_lang)
 
-    try:
-        await bot.send_message(
-            user_id,
-            "Менеджер завершил диалог. Если будут вопросы — я всегда на связи! 🎯",
-            reply_markup=get_main_menu_kb(user_i18n),
-            parse_mode=None
-        )
-    except Exception as e:
-        logging.error(f"Failed to notify user {user_id} about chat end: {e}")
+        if ended_by == "manager":
+            text = "Менеджер завершил диалог. Если будут вопросы — я всегда на связи! 🎯"
+        else:
+            text = "Вы вышли из чата с менеджером. Если будут вопросы — я всегда на связи! 🎯"
+
+        try:
+            await bot.send_message(
+                user_id,
+                text,
+                reply_markup=get_main_menu_kb(user_i18n),
+                parse_mode=None
+            )
+        except Exception as e:
+            logging.error(f"Failed to notify user {user_id} about chat end: {e}")
 
     return name
 
@@ -160,7 +186,6 @@ async def accept_chat_handler(callback: CallbackQuery, state: FSMContext, bot: B
 
     # Already chatting with this user?
     if user_id in chats:
-        # Just switch to them
         name = await _activate_chat(manager_id, user_id, bot, state, state.storage)
         await callback.answer(f"Переключено на {name}")
         await bot.send_message(
@@ -171,15 +196,11 @@ async def accept_chat_handler(callback: CallbackQuery, state: FSMContext, bot: B
         )
         return
 
-    # Add new chat (don't edit the original message — keep lead data visible!)
-    user_obj = callback.from_user  # This is manager, we need client info
-    # Get client info from callback message text
+    # Get client info from the notification message
     client_name = f"Клиент {user_id}"
     client_username = ""
 
-    # Try to parse name from the notification message
     if callback.message and callback.message.text:
-        import re
         name_match = re.search(r'Клиент:\s*(.+)', callback.message.text)
         if name_match:
             client_name = name_match.group(1).strip()
@@ -192,8 +213,7 @@ async def accept_chat_handler(callback: CallbackQuery, state: FSMContext, bot: B
     # Activate this chat
     name = await _activate_chat(manager_id, user_id, bot, state, state.storage)
 
-    # DON'T edit_text — that destroys the lead data!
-    # Instead, reply below the original message
+    # DON'T edit_text — keep lead data visible!
     try:
         await callback.message.reply(
             f"✅ Чат с {client_name} (ID: {user_id}) активен.",
@@ -206,7 +226,7 @@ async def accept_chat_handler(callback: CallbackQuery, state: FSMContext, bot: B
             parse_mode=None
         )
 
-    # Send keyboard
+    # Manager keyboard
     total = len(chats)
     await bot.send_message(
         manager_id,
@@ -218,11 +238,12 @@ async def accept_chat_handler(callback: CallbackQuery, state: FSMContext, bot: B
         parse_mode=None
     )
 
-    # Notify client
+    # Client gets MINIMAL keyboard — only "end chat"
     try:
         await bot.send_message(
             user_id,
-            "Менеджер подключился к чату! 👋 Сейчас с вами общается наш специалист.",
+            "Менеджер подключился к чату! 👋\nСейчас с вами общается наш специалист.\n\nДля завершения нажмите кнопку ниже.",
+            reply_markup=get_client_chat_kb(),
             parse_mode=None
         )
     except Exception as e:
@@ -256,7 +277,7 @@ async def switch_chat_inline(callback: CallbackQuery, state: FSMContext, bot: Bo
 
 
 # ============================================================
-# MANAGER IN CHAT — message routing
+# IN-CHAT MESSAGE ROUTING
 # ============================================================
 
 @router.message(ManagerChat.in_chat)
@@ -268,47 +289,52 @@ async def forward_chat_message(message: Message, state: FSMContext, bot: Bot):
 
     text = message.text.strip()
 
-    # ---- EXIT ----
+    # ---- EXIT COMMANDS (both manager and client) ----
     exit_cmds = [
-        "❌ Завершить диалог / Ավарտել",
+        "❌ Завершить диалог / Ավարտել",  # manager button
+        "❌ Завершить чат",                 # client button
         "Завершить диалог",
+        "Завершить чат",
         "Ավարտել",
         "/end", "/stop",
     ]
     if text in exit_cmds:
-        await end_active_chat(message, state, bot)
+        if sender_id == config.manager_id:
+            await end_active_chat_by_manager(message, state, bot)
+        else:
+            await end_chat_by_client(message, state, bot)
         return
 
+    # /start — manager: close all; client: exit chat
     if text == "/start":
-        await end_all_chats(message, state, bot)
+        if sender_id == config.manager_id:
+            await end_all_chats(message, state, bot)
+        else:
+            await end_chat_by_client(message, state, bot)
         return
 
-    # ---- CHAT LIST ----
-    if text == "📋 Список чатов":
-        await show_chat_list(message, state, bot)
-        return
-
-    # ---- SWITCH via keyboard button "🔀 Name [ID]" ----
-    if text.startswith("🔀 "):
-        import re
-        match = re.search(r'\[(\d+)\]', text)
-        if match:
-            target_uid = int(match.group(1))
-            chats = _get_open(sender_id)
-            if target_uid in chats:
-                name = await _activate_chat(sender_id, target_uid, bot, state, state.storage)
-                await message.answer(
-                    f"🔀 Активный чат: {name} (ID: {target_uid})",
-                    reply_markup=get_manager_chat_kb(sender_id),
-                    parse_mode=None
-                )
-                return
-            else:
-                await message.answer("Этот чат уже закрыт.", parse_mode=None)
-                return
-
-    # ---- ROUTE MESSAGE ----
+    # ---- MANAGER-ONLY CONTROLS ----
     if sender_id == config.manager_id:
+        if text == "📋 Список чатов":
+            await show_chat_list(message, state, bot)
+            return
+
+        if text.startswith("🔀 "):
+            match = re.search(r'\[(\d+)\]', text)
+            if match:
+                target_uid = int(match.group(1))
+                chats = _get_open(sender_id)
+                if target_uid in chats:
+                    name = await _activate_chat(sender_id, target_uid, bot, state, state.storage)
+                    await message.answer(
+                        f"🔀 Активный чат: {name} (ID: {target_uid})",
+                        reply_markup=get_manager_chat_kb(sender_id),
+                        parse_mode=None
+                    )
+                else:
+                    await message.answer("Этот чат уже закрыт.", parse_mode=None)
+                return
+
         # MANAGER -> active client
         active_uid = _get_active(sender_id)
         if active_uid:
@@ -322,28 +348,39 @@ async def forward_chat_message(message: Message, state: FSMContext, bot: Bot):
                 reply_markup=get_switch_inline_kb(sender_id) or None,
                 parse_mode=None
             )
-    else:
-        # CLIENT -> manager
-        data = await state.get_data()
-        manager_id = data.get("connected_manager_id", config.manager_id)
-        client_name = message.from_user.full_name or "Клиент"
-        username = message.from_user.username or "N/A"
+        return
 
-        active_for_manager = _get_active(manager_id)
+    # ---- CLIENT SENDING MESSAGE ----
 
-        # Mark if this isn't the currently active chat
-        prefix = ""
-        if active_for_manager != sender_id:
-            prefix = "⚠️ [другой чат] "
+    # Block menu button presses — don't forward to manager
+    if text in CLIENT_MENU_BUTTONS:
+        await message.answer(
+            "Сейчас вы в чате с менеджером.\n"
+            "Чтобы вернуться в меню, сначала завершите чат 👇",
+            reply_markup=get_client_chat_kb(),
+            parse_mode=None
+        )
+        return
 
-        try:
-            await bot.send_message(
-                manager_id,
-                f"📩 {prefix}[{client_name} @{username}]:\n{text}",
-                parse_mode=None
-            )
-        except Exception as e:
-            logging.error(f"Failed to forward to manager: {e}")
+    # Forward client message to manager
+    data = await state.get_data()
+    manager_id = data.get("connected_manager_id", config.manager_id)
+    client_name = message.from_user.full_name or "Клиент"
+    username = message.from_user.username or "N/A"
+
+    active_for_manager = _get_active(manager_id)
+    prefix = ""
+    if active_for_manager != sender_id:
+        prefix = "⚠️ [другой чат] "
+
+    try:
+        await bot.send_message(
+            manager_id,
+            f"📩 {prefix}[{client_name} @{username}]:\n{text}",
+            parse_mode=None
+        )
+    except Exception as e:
+        logging.error(f"Failed to forward to manager: {e}")
 
 
 # ============================================================
@@ -374,8 +411,8 @@ async def show_chat_list(message: Message, state: FSMContext, bot: Bot):
     )
 
 
-async def end_active_chat(message: Message, state: FSMContext, bot: Bot):
-    """Close only the currently active chat, switch to next if available."""
+async def end_active_chat_by_manager(message: Message, state: FSMContext, bot: Bot):
+    """Manager closes the currently active chat."""
     manager_id = message.from_user.id
     active_uid = _get_active(manager_id)
 
@@ -383,12 +420,14 @@ async def end_active_chat(message: Message, state: FSMContext, bot: Bot):
         await message.answer("Нет активного чата для завершения.", parse_mode=None)
         return
 
-    name = await _close_chat(manager_id, active_uid, bot, state, state.storage)
+    name = await _close_chat_for_client(
+        manager_id, active_uid, bot, state.storage,
+        notify_client=True, ended_by="manager"
+    )
 
     chats = _get_open(manager_id)
 
     if chats:
-        # Auto-switch to next available chat
         next_uid = next(iter(chats))
         next_name = await _activate_chat(manager_id, next_uid, bot, state, state.storage)
         await message.answer(
@@ -399,7 +438,6 @@ async def end_active_chat(message: Message, state: FSMContext, bot: Bot):
             parse_mode=None
         )
     else:
-        # No more chats — exit chat mode
         await state.clear()
         manager_i18n = get_i18n_for_user("ru")
         await message.answer(
@@ -409,13 +447,75 @@ async def end_active_chat(message: Message, state: FSMContext, bot: Bot):
         )
 
 
+async def end_chat_by_client(message: Message, state: FSMContext, bot: Bot):
+    """Client exits the chat themselves."""
+    client_id = message.from_user.id
+    data = await state.get_data()
+    manager_id = data.get("connected_manager_id", config.manager_id)
+
+    # Clear client FSM and restore menu
+    await state.clear()
+
+    user_data = await get_user(client_id)
+    user_lang = user_data.get("language", "ru") if user_data else "ru"
+    user_i18n = get_i18n_for_user(user_lang)
+
+    await message.answer(
+        "Вы вышли из чата с менеджером.\nЕсли будут вопросы — я всегда на связи! 🎯",
+        reply_markup=get_main_menu_kb(user_i18n),
+        parse_mode=None
+    )
+
+    # Remove from manager's open chats
+    chats = _get_open(manager_id)
+    client_info = chats.pop(client_id, {})
+    client_name = client_info.get("name", message.from_user.full_name or str(client_id))
+
+    if _get_active(manager_id) == client_id:
+        _set_active(manager_id, None)
+
+    # Notify manager
+    try:
+        if chats:
+            # Auto-switch manager to next chat
+            next_uid = next(iter(chats))
+            # We need manager's FSM context
+            manager_ctx = await get_user_fsm(bot, state.storage, manager_id)
+            next_name = await _activate_chat(manager_id, next_uid, bot, manager_ctx, state.storage)
+            await bot.send_message(
+                manager_id,
+                f"📤 Клиент {client_name} вышел из чата.\n"
+                f"🔀 Автопереключение на {next_name} (ID: {next_uid}).\n"
+                f"Открыто чатов: {len(chats)}",
+                reply_markup=get_manager_chat_kb(manager_id),
+                parse_mode=None
+            )
+        else:
+            # No more chats — clear manager state
+            manager_ctx = await get_user_fsm(bot, state.storage, manager_id)
+            await manager_ctx.clear()
+            manager_i18n = get_i18n_for_user("ru")
+            await bot.send_message(
+                manager_id,
+                f"📤 Клиент {client_name} вышел из чата. Все диалоги закрыты.\n"
+                f"Бот снова отвечает клиентам.",
+                reply_markup=get_main_menu_kb(manager_i18n),
+                parse_mode=None
+            )
+    except Exception as e:
+        logging.error(f"Failed to notify manager about client disconnect: {e}")
+
+
 async def end_all_chats(message: Message, state: FSMContext, bot: Bot):
-    """Close ALL open chats (e.g. on /start)."""
+    """Close ALL open chats (manager presses /start)."""
     manager_id = message.from_user.id
     chats = _get_open(manager_id)
 
     for uid in list(chats.keys()):
-        await _close_chat(manager_id, uid, bot, state, state.storage)
+        await _close_chat_for_client(
+            manager_id, uid, bot, state.storage,
+            notify_client=True, ended_by="manager"
+        )
 
     open_chats.pop(manager_id, None)
     active_chat.pop(manager_id, None)
