@@ -229,88 +229,29 @@ class AIService:
 
         return "\n\n---\n\n".join(parts)
 
-    async def _translate(self, text: str, direction: str, client) -> str:
-        """Translate text using the fast model.
-        direction: 'am_to_ru' or 'ru_to_am'
-        
-        For am_to_ru: handles Armenian script, Latin transliteration, and mixed text.
-        For ru_to_am: translates Russian to Armenian script.
-        
-        Returns original text on failure (safe fallback).
-        """
-        if direction == "am_to_ru":
-            system_msg = (
-                "Ты переводчик. Переведи текст на русский язык. "
-                "Текст может быть на армянском (армянскими буквами), на армянском латинскими буквами (транслит), "
-                "или на смешанном языке. Переведи всё на русский. "
-                "Имена, артикулы, числа, URL — оставь без изменений. "
-                "Отвечай ТОЛЬКО переводом, без пояснений."
-            )
-        else:  # ru_to_am
-            system_msg = (
-                "Ты переводчик. Переведи текст на армянский язык (армянскими буквами). "
-                "Сохрани форматирование, эмодзи, переносы строк. "
-                "Имена, артикулы, числа, URL, технические термины (Wildberries, WB, Go to Top) — оставь без изменений. "
-                "Цены в драмах (֏) оставь как есть. "
-                "Отвечай ТОЛЬКО переводом, без пояснений."
-            )
-
-        try:
-            response = await asyncio.wait_for(
-                client.chat.completions.create(
-                    model=self.router_model,  # Fast small model for translation
-                    messages=[
-                        {"role": "system", "content": system_msg},
-                        {"role": "user", "content": text}
-                    ],
-                    temperature=0.2,
-                    max_tokens=2000
-                ),
-                timeout=15.0
-            )
-            if response and response.choices:
-                translated = response.choices[0].message.content.strip()
-                if translated:
-                    logging.info(f"Translate {direction}: '{text[:40]}...' -> '{translated[:40]}...'")
-                    return translated
-        except Exception as e:
-            logging.warning(f"Translation {direction} failed: {e}")
-
-        return text  # Fallback: return original
-
     async def get_answer(self, question: str, language: str = "ru", user_id: int = 0) -> str:
-        is_armenian = (language == "am")
+        lang_str = "Русский (Russian)" if language == "ru" else "Հայերեն (Armenian)"
 
-        # ============================================================
-        # ARMENIAN PIPELINE: translate input to Russian first
-        # This gives much better AI quality since prompts are in Russian
-        # ============================================================
-        working_question = question
-        if is_armenian and self.clients:
-            working_question = await self._translate(question, "am_to_ru", self.clients[0])
-            logging.info(f"Armenian input translated: '{question[:50]}' -> '{working_question[:50]}'")
+        # Add to history
+        self.conversation.add_user_message(user_id, question)
 
-        # Add RUSSIAN version to history (AI always thinks in Russian)
-        self.conversation.add_user_message(user_id, working_question)
-
-        # Step 1: Route message (cheap, ~100 tokens) — always in Russian now
+        # Step 1: Route message (cheap, ~100 tokens)
         category = "FAQ"
         if USE_BLOCKS and self.clients:
-            category = await self._classify_message(working_question, self.clients[0])
-            logging.info(f"Router: '{working_question[:50]}...' -> {category}")
+            category = await self._classify_message(question, self.clients[0])
+            logging.info(f"Router: '{question[:50]}...' -> {category}")
 
         # Step 2: Build minimal prompt
         prompt = self._build_prompt(category)
         prompt = prompt.replace("{manager_id}", str(config.manager_id))
 
-        # Step 3: Build messages — ALWAYS Russian for the AI
+        # Step 3: Build messages
         messages = [
-            {"role": "system", "content": prompt + "\n\nТЕКУЩИЙ ЯЗЫК: Русский (Russian)"}
+            {"role": "system", "content": prompt + f"\n\nТЕКУЩИЙ ЯЗЫК: {lang_str}"}
         ]
         messages.extend(self.conversation.get_messages(user_id))
 
         # Step 4: Get response (with timeout and fallback)
-        russian_answer = None
         for i, client in enumerate(self.clients):
             for model in self.main_models:
                 try:
@@ -327,14 +268,11 @@ class AIService:
                     if response and response.choices:
                         answer = response.choices[0].message.content
                         clean_answer, lead_data = parse_lead_ready(answer)
-                        # Store RUSSIAN answer in history
                         self.conversation.add_assistant_message(user_id, clean_answer)
 
                         if lead_data:
-                            russian_answer = f"{clean_answer}\n[LEAD_DATA]{json.dumps(lead_data, ensure_ascii=False)}[/LEAD_DATA]"
-                        else:
-                            russian_answer = clean_answer
-                        break  # Got answer, exit model loop
+                            return f"{clean_answer}\n[LEAD_DATA]{json.dumps(lead_data, ensure_ascii=False)}[/LEAD_DATA]"
+                        return clean_answer
 
                 except asyncio.TimeoutError:
                     logging.warning(f"Timeout: Key {i+1}, Model {model}")
@@ -350,45 +288,7 @@ class AIService:
                         logging.error(f"Error: Key {i+1}, Model {model}: {e}")
                         continue
 
-            if russian_answer:
-                break  # Got answer, exit client loop
-
-        if not russian_answer:
-            fallback_ru = "Извините, я временно не могу ответить. Обратитесь к менеджеру через кнопку ниже 👱‍♀️"
-            if is_armenian and self.clients:
-                return await self._translate(fallback_ru, "ru_to_am", self.clients[0])
-            return fallback_ru
-
-        # ============================================================
-        # ARMENIAN PIPELINE: translate AI response back to Armenian
-        # ============================================================
-        if is_armenian and self.clients:
-            # Don't translate [LEAD_DATA] tags — extract, translate text, re-attach
-            lead_match = re.search(r'\[LEAD_DATA\].*?\[/LEAD_DATA\]', russian_answer, re.DOTALL)
-            if lead_match:
-                text_part = russian_answer[:lead_match.start()].strip()
-                lead_tag = lead_match.group(0)
-                translated_text = await self._translate(text_part, "ru_to_am", self.clients[0])
-                return f"{translated_text}\n{lead_tag}"
-            else:
-                return await self._translate(russian_answer, "ru_to_am", self.clients[0])
-
-        return russian_answer
-
-    async def translate_to_russian(self, text: str) -> str:
-        """Public method: translate Armenian/transliterated text to Russian.
-        Used by handlers to run trigger detection on Russian text.
-        Returns original text if translation fails or no clients available."""
-        if not self.clients:
-            return text
-        return await self._translate(text, "am_to_ru", self.clients[0])
-
-    async def translate_to_armenian(self, text: str) -> str:
-        """Public method: translate Russian text to Armenian.
-        Used by handlers to translate bot messages for Armenian users."""
-        if not self.clients:
-            return text
-        return await self._translate(text, "ru_to_am", self.clients[0])
+        return "Извините, я временно не могу ответить. Обратитесь к менеджеру через кнопку ниже 👱‍♀️"
 
     def clear_history(self, user_id: int):
         self.conversation.clear(user_id)
