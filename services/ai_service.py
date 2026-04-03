@@ -75,7 +75,7 @@ CATEGORY_BLOCKS = {
     "HOW_WE_WORK":       ["base", "how_we_work"],
     "PRICING":           ["base", "pricing"],
     "DATA_COLLECTION":   ["base", "data_collection", "pricing"],
-    "CALCULATION":       ["base", "data_collection", "pricing"],
+    "CALCULATION":       ["base", "data_collection", "pricing"],  # Same as DATA_COLLECTION
     "EXISTING_CLIENT":   ["base", "existing_client"],
     "OBJECTION":         ["base", "objections"],
     "FAQ":               ["base", "faq"],
@@ -98,9 +98,10 @@ GREETING, HOW_WE_WORK, PRICING, DATA_COLLECTION, CALCULATION, EXISTING_CLIENT, O
 
 Правила:
 - Приветствие, /start, первое сообщение → GREETING
-- Цены, стоимость, сколько стоит → PRICING
+- Цены, стоимость, сколько стоит (без конкретных чисел/заказа) → PRICING
 - Отправка данных (имя, артикул, ключи, числа) → DATA_COLLECTION
-- Расчёт, посчитайте → CALCULATION
+- Хочу заказать, мне нужно X выкупов, оформить заказ, сделать заказ, оставить заявку, закажу, давай начнём, готов заказать → DATA_COLLECTION
+- Расчёт, посчитайте, рассчитайте → DATA_COLLECTION
 - Я ваш клиент, статус, допвыкупы → EXISTING_CLIENT
 - Дорого, не верю, гарантия, блогер → OBJECTION
 - Вопрос (блокировка, сроки, отгрузка, валюта) → FAQ
@@ -110,6 +111,8 @@ GREETING, HOW_WE_WORK, PRICING, DATA_COLLECTION, CALCULATION, EXISTING_CLIENT, O
 - Как делаете, какой софт, механика → CONFIDENTIAL
 - Грубость, возврат, реквизиты, юрист → ESCALATION
 - Не по теме → OFFTOPIC
+
+ВАЖНО: Если клиент хочет заказать, купить, оформить, или называет конкретные числа выкупов/отзывов — это ВСЕГДА DATA_COLLECTION, даже если он ещё не отправил форму.
 
 Сообщение: """
 
