@@ -8,7 +8,7 @@ from config.config import config
 engine = create_async_engine(
     config.async_database_url, 
     echo=False,
-    pool_recycle=300, # Recycle connection every 5 minutes
+    pool_recycle=360, # Recycle connection every 6 minutes
     pool_pre_ping=True # Check connection status before using
 )
 
@@ -39,6 +39,26 @@ class Interaction(Base):
     bot_response = Column(Text)
     user_message = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class MessageMap(Base):
+    __tablename__ = "message_map"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    manager_chat_id = Column(BigInteger)
+    manager_msg_id = Column(BigInteger)
+    client_chat_id = Column(BigInteger)
+    client_msg_id = Column(BigInteger)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey("users.user_id"))
+    manager_id = Column(BigInteger)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    ended_at = Column(DateTime, nullable=True)
+    status = Column(String(50), default="active") # active, closed
 
 async def init_db():
     async with engine.begin() as conn:

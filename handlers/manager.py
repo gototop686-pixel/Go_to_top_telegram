@@ -9,7 +9,11 @@ from states.user_states import ManagerChat
 from keyboards.reply import get_main_menu_kb
 from aiogram.fsm.storage.base import StorageKey
 from middlewares.i18n import i18n_manager
-from database.crud import get_user
+from database.crud import (
+    get_user, map_message, get_client_msg_id, 
+    start_chat_session, end_chat_session,
+    get_active_sessions_count, get_closed_sessions_today
+)
 
 router = Router()
 
@@ -59,8 +63,20 @@ def get_manager_chat_kb(manager_id: int) -> ReplyKeyboardMarkup:
             rows.append([KeyboardButton(text=f"🔀 {name} [{uid}]")])
 
     rows.append([KeyboardButton(text="❌ Завершить диалог / Ավարտել")])
+    rows.append([KeyboardButton(text="📊 Панель управления")])
     rows.append([KeyboardButton(text="📋 Список чатов")])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, one_time_keyboard=False)
+
+
+def get_dashboard_inline_kb() -> InlineKeyboardMarkup:
+    """Dashboard control panel."""
+    buttons = [
+        [InlineKeyboardButton(text="🟢 Активные чаты", callback_data="dash:active")],
+        [InlineKeyboardButton(text="🔔 Запросы на чат", callback_data="dash:requests")],
+        [InlineKeyboardButton(text="✅ Завершённые сегодня", callback_data="dash:finished")],
+        [InlineKeyboardButton(text="🔄 Обновить", callback_data="dash:refresh")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def get_switch_inline_kb(manager_id: int) -> InlineKeyboardMarkup | None:
@@ -132,6 +148,9 @@ async def _activate_chat(manager_id: int, user_id: int, bot: Bot, state: FSMCont
     await user_ctx.set_state(ManagerChat.in_chat)
     await user_ctx.update_data(connected_manager_id=manager_id)
 
+    # Database: Start session
+    await start_chat_session(user_id, manager_id)
+
     return name
 
 
@@ -148,6 +167,9 @@ async def _close_chat_for_client(manager_id: int, user_id: int, bot: Bot, storag
     # Clear user FSM
     user_ctx = await get_user_fsm(bot, storage, user_id)
     await user_ctx.clear()
+
+    # Database: End session
+    await end_chat_session(user_id)
 
     # Restore normal menu for client
     if notify_client:
@@ -344,11 +366,14 @@ async def forward_chat_message(message: Message, state: FSMContext, bot: Bot):
 
             try:
                 # Forward everything (media + text) to client
-                await bot.copy_message(
+                cl_msg = await bot.copy_message(
                     chat_id=active_uid,
                     from_chat_id=message.chat.id,
                     message_id=message.message_id
                 )
+                # Map messages for sync (edit/delete)
+                await map_message(message.chat.id, message.message_id, active_uid, cl_msg.message_id)
+
                 # Small confirmation for the manager
                 await message.reply(
                     f"✅ Отправлено: {name} (@{username})",
@@ -411,12 +436,47 @@ async def forward_chat_message(message: Message, state: FSMContext, bot: Bot):
         logging.error(f"Failed to forward to manager: {e}")
 
 
+@router.edited_message(ManagerChat.in_chat)
+async def sync_manager_edit(message: Message, bot: Bot):
+    """Sync manager edits to client."""
+    if message.from_user.id != config.manager_id:
+        return
+    
+    cl_msg_id = await get_client_msg_id(message.chat.id, message.message_id)
+    if not cl_msg_id:
+        return
+
+    active_uid = _get_active(message.from_user.id)
+    if not active_uid:
+        return
+
+    try:
+        if message.text:
+            await bot.edit_message_text(
+                text=message.text,
+                chat_id=active_uid,
+                message_id=cl_msg_id
+            )
+        elif message.caption:
+            await bot.edit_message_caption(
+                chat_id=active_uid,
+                message_id=cl_msg_id,
+                caption=message.caption
+            )
+    except Exception as e:
+        logging.error(f"Failed to sync manager edit: {e}")
+
+
 # ============================================================
 # CHAT MANAGEMENT
 # ============================================================
 
 async def show_chat_list(message: Message, state: FSMContext, bot: Bot):
     manager_id = message.from_user.id
+    if message.text == "📊 Панель управления":
+        await show_dashboard(message)
+        return
+    
     chats = _get_open(manager_id)
     active = _get_active(manager_id)
 
@@ -555,3 +615,70 @@ async def end_all_chats(message: Message, state: FSMContext, bot: Bot):
         reply_markup=get_main_menu_kb(manager_i18n),
         parse_mode=None
     )
+
+
+async def show_dashboard(message: Message):
+    """Main dashboard entry."""
+    active_count = await get_active_sessions_count()
+    closed_today = await get_closed_sessions_today()
+    
+    text = (
+        "📊 **Панель управления менеджера**\n\n"
+        f"🟢 Активных диалогов: {active_count}\n"
+        f"✅ Завершено сегодня: {len(closed_today)}\n\n"
+        "Выберите раздел для деталей 👇"
+    )
+    await message.answer(text, reply_markup=get_dashboard_inline_kb(), parse_mode="Markdown")
+
+
+@router.callback_query(F.data.startswith("dash:"))
+async def process_dashboard_callback(callback: CallbackQuery, bot: Bot):
+    action = callback.data.split(":")[1]
+    
+    if action == "refresh":
+        active_count = await get_active_sessions_count()
+        closed_today = await get_closed_sessions_today()
+        text = (
+            "📊 **Панель управления менеджера**\n\n"
+            f"🟢 Активных диалогов: {active_count}\n"
+            f"✅ Завершено сегодня: {len(closed_today)}\n\n"
+            "Обновлено ✅"
+        )
+        try:
+            await callback.message.edit_text(text, reply_markup=get_dashboard_inline_kb(), parse_mode="Markdown")
+        except Exception:
+            pass
+        await callback.answer()
+        
+    elif action == "active":
+        manager_id = callback.from_user.id
+        chats = _get_open(manager_id)
+        if not chats:
+            await callback.answer("Нет активных чатов в оперативной памяти.", show_alert=True)
+            return
+        
+        lines = ["🟢 **Список активных чатов:**\n"]
+        for uid, info in chats.items():
+            name = info.get("name", "Клиент")
+            username = info.get("username", "N/A")
+            lines.append(f"👤 {name} (@{username}) [ID: {uid}]")
+        
+        await callback.message.answer("\n".join(lines), parse_mode="Markdown")
+        await callback.answer()
+
+    elif action == "finished":
+        closed = await get_closed_sessions_today()
+        if not closed:
+            await callback.answer("Сегодня ещё нет завершённых чатов.", show_alert=True)
+            return
+            
+        lines = ["✅ **Завершённые сегодня:**\n"]
+        for sess, name in closed:
+            time_str = sess.ended_at.strftime("%H:%M")
+            lines.append(f"🏁 {time_str} — {name} [ID: {sess.user_id}]")
+            
+        await callback.message.answer("\n".join(lines), parse_mode="Markdown")
+        await callback.answer()
+
+    elif action == "requests":
+        await callback.answer("Все новые запросы приходят в виде уведомлений с кнопкой 'Принять'.", show_alert=True)

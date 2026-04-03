@@ -2,7 +2,68 @@ from sqlalchemy import select, update, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, Dict
 
-from .models import User, Interaction, async_session
+from .models import User, Interaction, MessageMap, ChatSession, async_session
+from datetime import datetime, timedelta
+
+async def get_user_full(user_id: int):
+    async with async_session() as session:
+        result = await session.execute(select(User).where(User.user_id == user_id))
+        return result.scalar_one_or_none()
+
+async def map_message(m_chat_id: int, m_msg_id: int, c_chat_id: int, c_msg_id: int):
+    async with async_session() as session:
+        mapping = MessageMap(
+            manager_chat_id=m_chat_id,
+            manager_msg_id=m_msg_id,
+            client_chat_id=c_chat_id,
+            client_msg_id=c_msg_id
+        )
+        session.add(mapping)
+        await session.commit()
+
+async def get_client_msg_id(m_chat_id: int, m_msg_id: int) -> Optional[int]:
+    async with async_session() as session:
+        result = await session.execute(
+            select(MessageMap.client_msg_id)
+            .where(MessageMap.manager_chat_id == m_chat_id)
+            .where(MessageMap.manager_msg_id == m_msg_id)
+        )
+        return result.scalar()
+
+async def start_chat_session(user_id: int, manager_id: int):
+    async with async_session() as session:
+        new_session = ChatSession(user_id=user_id, manager_id=manager_id)
+        session.add(new_session)
+        await session.commit()
+
+async def end_chat_session(user_id: int):
+    async with async_session() as session:
+        await session.execute(
+            update(ChatSession)
+            .where(ChatSession.user_id == user_id)
+            .where(ChatSession.status == "active")
+            .values(status="closed", ended_at=datetime.utcnow())
+        )
+        await session.commit()
+
+async def get_active_sessions_count() -> int:
+    async with async_session() as session:
+        result = await session.execute(
+            select(ChatSession)
+            .where(ChatSession.status == "active")
+        )
+        return len(result.all())
+
+async def get_closed_sessions_today() -> list:
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    async with async_session() as session:
+        result = await session.execute(
+            select(ChatSession, User.name)
+            .join(User, ChatSession.user_id == User.user_id)
+            .where(ChatSession.status == "closed")
+            .where(ChatSession.ended_at >= today_start)
+        )
+        return result.all()
 
 async def get_user(user_id: int) -> Optional[Dict]:
     async with async_session() as session:
