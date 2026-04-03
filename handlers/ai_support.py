@@ -385,26 +385,46 @@ async def process_question(message: Message, i18n, language: str, state: FSMCont
         return
 
     user_id = message.from_user.id
+    is_armenian = (language == "am")
+
+    # For Armenian users: translate message to Russian for trigger detection.
+    # Original text is kept for logging; Russian text used for all checks.
+    original_text = message.text
+    check_text = message.text
+    if is_armenian:
+        check_text = await ai_service.translate_to_russian(message.text)
+        logging.info(f"Armenian check_text: '{message.text[:50]}' -> '{check_text[:50]}'")
+
+    # Helper: translate bot response to Armenian if needed
+    async def localize(text: str) -> str:
+        if is_armenian:
+            return await ai_service.translate_to_armenian(text)
+        return text
 
     # CHECK 0: Does client want to talk to a manager? (text triggers)
-    if wants_manager(message.text):
-        logging.info(f"Manager request detected from user {user_id}: {message.text[:80]}")
+    if wants_manager(check_text):
+        logging.info(f"Manager request detected from user {user_id}: {original_text[:80]}")
+        response_text = await localize("Передаю ваш запрос менеджеру 👋\nОн свяжется с вами в ближайшее время!")
         await send_safe(
             message,
-            "Передаю ваш запрос менеджеру 👋\nОн свяжется с вами в ближайшее время!",
+            response_text,
             reply_markup=get_ai_support_kb(i18n)
         )
-        await notify_manager_contact_request(bot, message.from_user, message.text)
-        await log_interaction(user_id, 'ai', 'manager_request', message.text, "Manager request forwarded")
+        await notify_manager_contact_request(bot, message.from_user, original_text)
+        await log_interaction(user_id, 'ai', 'manager_request', original_text, "Manager request forwarded")
         return
 
     # CHECK 1: Is this a FULLY filled form from client? (3+ filled fields)
+    # Forms use Russian field names even for Armenian users (they copy the template)
     filled = detect_filled_form(message.text)
     if filled:
         logging.info(f"Filled form detected from user {user_id}: {filled}")
+        response_text = await localize(
+            "Данные получены ✅\n\nПередаю менеджеру для подготовки расчёта. Менеджер свяжется с вами в ближайшее время 📋"
+        )
         await send_safe(
             message,
-            "Данные получены ✅\n\nПередаю менеджеру для подготовки расчёта. Менеджер свяжется с вами в ближайшее время 📋",
+            response_text,
             reply_markup=get_ai_support_kb(i18n)
         )
         await log_interaction(user_id, 'ai', 'form_submitted', message.text, "Form received")
@@ -417,28 +437,28 @@ async def process_question(message: Message, i18n, language: str, state: FSMCont
         partial_fields, missing_names = incomplete
         logging.info(f"Incomplete form from user {user_id}: filled={partial_fields}, missing={missing_names}")
 
-        # Tell client what's missing and resend the form
         missing_text = ", ".join(missing_names)
-        await send_safe(
-            message,
+        response_text = await localize(
             f"Спасибо за данные, но не все поля заполнены ⚠️\n\n"
             f"Не хватает: {missing_text}\n\n"
             f"Пожалуйста, скопируйте форму ещё раз, заполните ВСЕ поля и отправьте одним сообщением 👇"
         )
+        await send_safe(message, response_text)
         await send_copyable_form(message, reply_markup=get_ai_support_kb(i18n))
 
-        # ALWAYS notify manager about the attempt
         await notify_manager_incomplete_form(bot, message.from_user, partial_fields, missing_names, message.text)
         await log_interaction(user_id, 'ai', 'form_incomplete', message.text, f"Missing: {missing_text}")
         return
 
     # Regular AI conversation
+    # NOTE: ai_service.get_answer handles Armenian translation internally
+    # (translates input to Russian, gets AI answer, translates back to Armenian)
     answer = await ai_service.get_answer(message.text, language, user_id=user_id)
 
     # Check for [LEAD_DATA] tag from AI
     clean_answer, lead_data = extract_lead_data(answer)
 
-    await log_interaction(user_id, 'ai', 'questioning', message.text, clean_answer)
+    await log_interaction(user_id, 'ai', 'questioning', original_text, clean_answer)
 
     # Send response — intercept form if AI tried to include one
     await send_ai_response(message, clean_answer, reply_markup=get_ai_support_kb(i18n))
