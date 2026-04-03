@@ -131,32 +131,77 @@ FIELD_PATTERNS = {
 
 def detect_filled_form(text: str) -> dict | None:
     """Detect if client sent a filled form. Returns parsed fields or None."""
+    fields, _ = _parse_form_fields(text)
+    # Need at least 3 filled fields to count as a complete form
+    if len(fields) >= 3:
+        return fields
+    return None
+
+
+def _parse_form_fields(text: str) -> tuple[dict, int]:
+    """Parse form fields from text. Returns (filled_fields, total_form_lines).
+    total_form_lines > 0 means the text looks like a form attempt."""
     lines = text.strip().split("\n")
     fields = {}
+    form_line_count = 0
 
     for line in lines:
         if ":" not in line:
             continue
         key_part, _, val_part = line.partition(":")
-        # Clean key: remove emojis and extra spaces
         key_clean = re.sub(r'[^\w\s]', '', key_part, flags=re.UNICODE).strip().lower()
         val_clean = val_part.strip()
 
-        if not val_clean or val_clean in ["-", "—", "нет", "не нужны"]:
-            continue
-
+        # Check if this line matches any known form field
+        matched_field = None
         for field_name, patterns in FIELD_PATTERNS.items():
-            if field_name in fields:
-                continue
             for pat in patterns:
                 if re.search(pat, key_clean):
-                    fields[field_name] = val_clean
+                    matched_field = field_name
                     break
+            if matched_field:
+                break
 
-    # Need at least 3 filled fields to count as a form
+        if matched_field:
+            form_line_count += 1
+            if val_clean and val_clean not in ["-", "—", "нет", "не нужны"]:
+                if matched_field not in fields:
+                    fields[matched_field] = val_clean
+
+    return fields, form_line_count
+
+
+def detect_incomplete_form(text: str) -> tuple[dict, list] | None:
+    """Detect if client tried to send a form but didn't fill enough fields.
+    Returns (filled_fields, missing_field_names) or None if not a form at all."""
+    fields, form_lines = _parse_form_fields(text)
+
+    # If text has 3+ form-like lines, it's a form attempt
+    if form_lines < 3:
+        return None
+
+    # It IS a form attempt. Check what's missing.
+    required_fields = ["name", "article", "buyout_count"]
+    important_fields = ["name", "article", "wb_price", "buyout_count", "keywords"]
+
+    field_labels_ru = {
+        "name": "Имя",
+        "article": "Артикул WB",
+        "wb_price": "Цена товара на WB",
+        "buyout_count": "Количество выкупов",
+        "keywords": "Ключевые слова",
+    }
+
+    missing = []
+    for f in important_fields:
+        if f not in fields:
+            missing.append(field_labels_ru.get(f, f))
+
     if len(fields) >= 3:
-        return fields
-    return None
+        # Enough data — this is a valid form (handled by detect_filled_form)
+        return None
+
+    return fields, missing
 
 
 # ============================================================
@@ -281,7 +326,7 @@ async def process_question(message: Message, i18n, language: str, state: FSMCont
 
     user_id = message.from_user.id
 
-    # CHECK: Is this a filled form from client?
+    # CHECK 1: Is this a FULLY filled form from client? (3+ filled fields)
     filled = detect_filled_form(message.text)
     if filled:
         logging.info(f"Filled form detected from user {user_id}: {filled}")
@@ -292,6 +337,27 @@ async def process_question(message: Message, i18n, language: str, state: FSMCont
         )
         await log_interaction(user_id, 'ai', 'form_submitted', message.text, "Form received")
         await notify_manager_lead(bot, message.from_user, filled, message.text)
+        return
+
+    # CHECK 2: Is this an INCOMPLETE form attempt? (looks like form but <3 filled fields)
+    incomplete = detect_incomplete_form(message.text)
+    if incomplete:
+        partial_fields, missing_names = incomplete
+        logging.info(f"Incomplete form from user {user_id}: filled={partial_fields}, missing={missing_names}")
+
+        # Tell client what's missing and resend the form
+        missing_text = ", ".join(missing_names)
+        await send_safe(
+            message,
+            f"Спасибо за данные, но не все поля заполнены ⚠️\n\n"
+            f"Не хватает: {missing_text}\n\n"
+            f"Пожалуйста, скопируйте форму ещё раз, заполните ВСЕ поля и отправьте одним сообщением 👇"
+        )
+        await send_copyable_form(message, reply_markup=get_ai_support_kb(i18n))
+
+        # ALWAYS notify manager about the attempt
+        await notify_manager_incomplete_form(bot, message.from_user, partial_fields, missing_names, message.text)
+        await log_interaction(user_id, 'ai', 'form_incomplete', message.text, f"Missing: {missing_text}")
         return
 
     # Regular AI conversation
@@ -308,6 +374,44 @@ async def process_question(message: Message, i18n, language: str, state: FSMCont
     # If AI tagged lead data — also notify manager
     if lead_data:
         await notify_manager_lead(bot, message.from_user, lead_data, message.text)
+
+
+async def notify_manager_incomplete_form(bot: Bot, user, partial_fields: dict, missing: list, raw_text: str = ""):
+    """Notify manager that a client tried to send a form but it's incomplete."""
+    msg = (
+        f"⚠️ НЕПОЛНАЯ ЗАЯВКА\n\n"
+        f"👤 Клиент: {user.full_name}\n"
+        f"📱 Telegram: @{user.username or 'нет username'}\n"
+        f"🆔 ID: {user.id}\n\n"
+    )
+
+    if partial_fields:
+        msg += "Заполнено:\n"
+        field_labels = {
+            "name": "👤 Имя", "article": "🎯 Артикул", "wb_price": "💰 Цена WB",
+            "buyout_count": "🛒 Выкупов", "keywords": "🔑 Ключи",
+            "review_count": "⭐ Отзывов", "dimensions": "📐 Размеры",
+            "box_capacity": "📦 Короб", "extra_services": "📸 Доп. услуги",
+            "promo_code": "🏷️ Промокод",
+        }
+        for key, value in partial_fields.items():
+            label = field_labels.get(key, key)
+            msg += f"  {label}: {value}\n"
+
+    if missing:
+        msg += f"\n❌ Не заполнено: {', '.join(missing)}\n"
+
+    msg += "\nБот попросил клиента заполнить форму повторно."
+
+    try:
+        await bot.send_message(
+            config.manager_id,
+            msg,
+            reply_markup=get_manager_accept_kb(user.id)
+        )
+        logging.info(f"Manager notified about incomplete form from user {user.id}")
+    except Exception as e:
+        logging.error(f"Failed to notify manager about incomplete form: {e}")
 
 
 async def notify_manager_lead(bot: Bot, user, lead_data: dict, raw_text: str = ""):
