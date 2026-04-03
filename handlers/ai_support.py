@@ -35,9 +35,9 @@ FORM_TEMPLATE = (
     "Промокод (если есть):"
 )
 
-FORM_INTRO = "Для расчёта заполните форму ниже 📋\nНажмите на блок, чтобы скопировать, заполните и отправьте одним сообщением:"
+FORM_INTRO = "📋 Для расчёта заполните форму ниже.\nНажмите на блок — он скопируется. Заполните и отправьте одним сообщением:"
 
-FORM_OUTRO = "☝️ Нажмите на текст выше — он скопируется. Заполните напротив каждого пункта и отправьте мне одним сообщением."
+FORM_OUTRO = "☝️ Нажмите на текст выше — он скопируется.\nЗаполните напротив каждого пункта и отправьте мне одним сообщением."
 
 
 # ============================================================
@@ -176,36 +176,56 @@ async def send_safe(message: Message, text: str, **kwargs):
 
 
 async def send_copyable_form(message: Message, **kwargs):
-    """Send the data collection form as 3 messages:
-    1. Intro text (plain)
-    2. Form fields (<code> block — one-tap copy in Telegram)
-    3. Instruction (plain, with keyboard)
+    """Send the data collection form as ONE message:
+    Intro + <pre> block (green bg + left border + copy button in Telegram) + outro.
+    All in a single message so the client sees one clean bubble.
     """
-    # 1. Intro
-    await send_safe(message, FORM_INTRO)
-
-    # 2. Form as <code> block — THIS is what client taps to copy
     escaped = html_lib.escape(FORM_TEMPLATE)
-    form_html = f"<code>{escaped}</code>"
+    # <pre> in Telegram renders as: green background, thick left border,
+    # and a "Copy" button in the top-right corner — exactly like crypto address blocks.
+    combined_html = (
+        f"{html_lib.escape(FORM_INTRO)}\n\n"
+        f"<pre>{escaped}</pre>\n\n"
+        f"{html_lib.escape(FORM_OUTRO)}"
+    )
     try:
-        await message.answer(form_html, parse_mode=ParseMode.HTML)
+        await message.answer(combined_html, parse_mode=ParseMode.HTML, **kwargs)
     except Exception as e:
-        logging.warning(f"HTML <code> failed: {e}")
-        await send_safe(message, FORM_TEMPLATE)
-
-    # 3. Instruction with keyboard
-    await send_safe(message, FORM_OUTRO, **kwargs)
+        logging.warning(f"HTML <pre> form failed: {e}")
+        # Fallback: send as plain text in one message
+        fallback = f"{FORM_INTRO}\n\n{FORM_TEMPLATE}\n\n{FORM_OUTRO}"
+        await send_safe(message, fallback, **kwargs)
 
 
 async def send_ai_response(message: Message, text: str, **kwargs):
     """Send AI response. If AI tried to include a form — replace with
     our hardcoded copyable form. Otherwise send as plain text."""
     if ai_wants_form(text):
-        # AI wanted to send form — strip AI's form, send intro + our <code> form
+        # AI wanted to send form — strip AI's form, send as ONE message with <pre> block
         intro = strip_form_from_ai(text)
-        if intro and intro != FORM_INTRO:
-            await send_safe(message, intro)
-        await send_copyable_form(message, **kwargs)
+        custom_intro = intro if (intro and intro != FORM_INTRO) else None
+        escaped_form = html_lib.escape(FORM_TEMPLATE)
+
+        if custom_intro:
+            # AI had a custom intro — use it instead of default
+            combined_html = (
+                f"{html_lib.escape(custom_intro)}\n\n"
+                f"<pre>{escaped_form}</pre>\n\n"
+                f"{html_lib.escape(FORM_OUTRO)}"
+            )
+        else:
+            combined_html = (
+                f"{html_lib.escape(FORM_INTRO)}\n\n"
+                f"<pre>{escaped_form}</pre>\n\n"
+                f"{html_lib.escape(FORM_OUTRO)}"
+            )
+
+        try:
+            await message.answer(combined_html, parse_mode=ParseMode.HTML, **kwargs)
+        except Exception as e:
+            logging.warning(f"HTML <pre> form in AI response failed: {e}")
+            fallback = f"{custom_intro or FORM_INTRO}\n\n{FORM_TEMPLATE}\n\n{FORM_OUTRO}"
+            await send_safe(message, fallback, **kwargs)
     else:
         await send_safe(message, text, **kwargs)
 
