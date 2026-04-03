@@ -340,6 +340,10 @@ async def forward_chat_message(message: Message, state: FSMContext, bot: Bot):
             await show_chat_list(message, state, bot)
             return
 
+        if text == "📊 Панель управления":
+            await show_dashboard(message)
+            return
+
         if text.startswith("🔀 "):
             match = re.search(r'\[(\d+)\]', text)
             if match:
@@ -486,6 +490,7 @@ async def show_chat_list(message: Message, state: FSMContext, bot: Bot):
 
     lines = ["📋 Открытые чаты:\n"]
     for uid, info in chats.items():
+        name = info.get("name", "Клиент")
         username = info.get("username", "N/A")
         marker = " ← АКТИВНЫЙ" if uid == active else ""
         lines.append(f"{'🟢' if uid == active else '⚪'} {name} (@{username}) (ID: {uid}){marker}")
