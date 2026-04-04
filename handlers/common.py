@@ -96,42 +96,39 @@ async def show_how_to_order(message: Message, i18n):
     i18n_manager.get("btn_about_us", "am")
 ]))
 async def show_about_us(message: Message, i18n):
-    import os
-    from aiogram.types import FSInputFile
-
+    from aiogram.types import LinkPreviewOptions
     import html as html_lib
+
     about_text = html_lib.escape(i18n("about_us_msg"))
     links = i18n("about_us_links")  # Already HTML, don't escape
-    
-    # Build combined caption: escaped text + raw HTML links
+
+    # Logo URL (public GitHub raw link)
+    logo_url = "https://raw.githubusercontent.com/gototop686-pixel/Go_to_top_telegram/main/assets/logo.jpg"
+
+    # Build message: invisible link for logo preview + text + social links
+    # The invisible zero-width space link makes Telegram show the image as a large preview
     if links and links != "about_us_links":
-        caption = f"{about_text}\n\n📱 {links}"
+        full_text = f'<a href="{logo_url}">\u200b</a>{about_text}\n\n📱 {links}'
     else:
-        caption = about_text
+        full_text = f'<a href="{logo_url}">\u200b</a>{about_text}'
 
-    # Send as ONE message: photo + caption
-    logo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "logo.jpg")
-    if os.path.exists(logo_path):
-        try:
-            photo = FSInputFile(logo_path)
-            # Telegram caption limit is 1024 chars
-            if len(caption) <= 1024:
-                await message.answer_photo(
-                    photo,
-                    caption=caption,
-                    reply_markup=get_main_menu_kb(i18n),
-                    parse_mode="HTML"
-                )
-            else:
-                # Too long for caption — send photo then text
-                await message.answer_photo(photo)
-                await message.answer(caption, reply_markup=get_main_menu_kb(i18n), parse_mode="HTML")
-            return
-        except Exception as e:
-            logging.error(f"Failed to send about us with photo: {e}")
-
-    # Fallback: text only
-    await message.answer(caption, reply_markup=get_main_menu_kb(i18n), parse_mode="HTML")
+    try:
+        # Send as ONE text message with link preview showing the logo
+        await message.answer(
+            full_text,
+            reply_markup=get_main_menu_kb(i18n),
+            parse_mode="HTML",
+            link_preview_options=LinkPreviewOptions(
+                url=logo_url,
+                show_above_text=True,
+                prefer_large_media=True,
+            ),
+        )
+    except Exception as e:
+        logging.error(f"Failed to send about us with link preview: {e}")
+        # Fallback: plain text without logo
+        fallback = f"{about_text}\n\n📱 {links}" if links and links != "about_us_links" else about_text
+        await message.answer(fallback, reply_markup=get_main_menu_kb(i18n), parse_mode="HTML")
 
 
 # ============================================================
