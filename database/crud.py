@@ -114,6 +114,19 @@ async def accept_chat_request(user_id: int):
         await session.commit()
 
 
+async def cancel_pending_request(user_id: int) -> bool:
+    """Cancel pending chat requests from this user. Returns True if any were cancelled."""
+    async with async_session() as session:
+        result = await session.execute(
+            update(ChatRequest)
+            .where(ChatRequest.user_id == user_id)
+            .where(ChatRequest.status == "pending")
+            .values(status="cancelled")
+        )
+        await session.commit()
+        return result.rowcount > 0
+
+
 async def clear_finished_sessions_today():
     """Delete all finished chat sessions from today."""
     today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)

@@ -111,7 +111,7 @@ def _load_menu_buttons():
         "btn_new_client", "btn_existing_client", "btn_ask_question",
         "btn_contact_manager", "btn_calc_on_site", "btn_back_to_menu",
         "btn_check_status", "btn_faq", "btn_price_list", "btn_how_to_order",
-        "btn_about_us", "btn_change_language",
+        "btn_about_us", "btn_change_language", "btn_cancel_request",
         "btn_price_main", "btn_price_reviews", "btn_price_photo_video",
         "btn_price_fulfillment", "btn_price_delivery",
     ]

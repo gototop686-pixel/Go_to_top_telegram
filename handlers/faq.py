@@ -1,6 +1,6 @@
 """
 FAQ handler — Armenian static FAQ + Russian AI FAQ.
-Armenian: shows a list of questions as buttons, answers statically.
+Armenian: shows a list of questions as buttons (grouped by category), answers statically.
 Russian: redirects to AI support (Liya).
 """
 import logging
@@ -11,12 +11,15 @@ from aiogram.fsm.context import FSMContext
 from states.user_states import SupportMode
 from keyboards.reply import get_main_menu_kb, get_faq_kb, get_ai_support_kb
 from middlewares.i18n import i18n_manager
-from handlers.faq_data import ARMENIAN_FAQ
+from handlers.faq_data import ARMENIAN_FAQ, ARMENIAN_FAQ_CATEGORIES
 
 router = Router()
 
 # Build a lookup dict: question_text -> answer
 _FAQ_ANSWERS = {item["question"]: item["answer"] for item in ARMENIAN_FAQ}
+
+# Build a set of category titles so we can handle taps on them
+_CATEGORY_TITLES = {cat["title"] for cat in ARMENIAN_FAQ_CATEGORIES}
 
 
 @router.message(F.text.in_([
@@ -41,6 +44,16 @@ async def handle_faq_button(message: Message, i18n, language: str, state: FSMCon
             reply_markup=get_ai_support_kb(i18n),
             parse_mode=None
         )
+
+
+@router.message(F.text.in_(_CATEGORY_TITLES))
+async def handle_category_header(message: Message, i18n, language: str):
+    """User tapped a category header — just remind them to pick a question."""
+    await message.answer(
+        "\u0538\u0576\u057f\u0580\u0565\u0584 \u0570\u0561\u0580\u0581\u0568 \u057d\u057f\u0578\u0580\u0587\u0589 \U0001f447",
+        reply_markup=get_faq_kb(i18n),
+        parse_mode=None
+    )
 
 
 @router.message(F.text.in_(list(_FAQ_ANSWERS.keys())))

@@ -40,16 +40,34 @@ def get_back_kb(i18n: Callable) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
 
+def get_waiting_for_manager_kb(i18n: Callable) -> ReplyKeyboardMarkup:
+    """Keyboard shown while waiting for manager — cancel + menu."""
+    kb = [
+        [KeyboardButton(text=i18n("btn_cancel_request"))],
+        [KeyboardButton(text=i18n("btn_back_to_menu"))],
+    ]
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
+
+
 def get_faq_kb(i18n: Callable) -> ReplyKeyboardMarkup:
-    """FAQ sub-menu keyboard — used for Armenian FAQ list."""
-    from handlers.faq_data import ARMENIAN_FAQ
+    """FAQ sub-menu keyboard — Armenian FAQ list with category headers.
+    Back-to-menu and contact-manager are at the TOP so users don't have
+    to scroll past 29 questions to reach them."""
+    from handlers.faq_data import ARMENIAN_FAQ_CATEGORIES
     kb = []
-    # "Contact manager" button at the top
-    kb.append([KeyboardButton(text=i18n("btn_contact_manager"))])
-    # FAQ questions as buttons (each on its own row)
-    for item in ARMENIAN_FAQ:
-        kb.append([KeyboardButton(text=item["question"])])
-    # Back to menu
+    # Navigation buttons at the TOP — easy access without scrolling
+    kb.append([
+        KeyboardButton(text=i18n("btn_back_to_menu")),
+        KeyboardButton(text=i18n("btn_contact_manager")),
+    ])
+    # FAQ questions grouped by category
+    for cat in ARMENIAN_FAQ_CATEGORIES:
+        # Category header as a non-clickable-looking button (just a label)
+        kb.append([KeyboardButton(text=cat["title"])])
+        # Questions under this category
+        for item in cat["questions"]:
+            kb.append([KeyboardButton(text=item["question"])])
+    # Back to menu at the bottom too (convenience)
     kb.append([KeyboardButton(text=i18n("btn_back_to_menu"))])
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 

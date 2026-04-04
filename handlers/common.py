@@ -7,7 +7,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 
 from config.config import config
-from keyboards.reply import get_main_menu_kb, get_language_kb
+from keyboards.reply import get_main_menu_kb, get_language_kb, get_waiting_for_manager_kb
 from keyboards.inline import get_manager_accept_kb
 from services.ai_service import ai_service
 from database.crud import save_user, update_user_language, log_interaction, save_chat_request, get_user as get_user_data
@@ -132,6 +132,43 @@ async def show_about_us(message: Message, i18n):
 
 
 # ============================================================
+# CANCEL REQUEST button (while waiting for manager)
+# ============================================================
+
+@router.message(F.text.in_([
+    i18n_manager.get("btn_cancel_request", "ru"),
+    i18n_manager.get("btn_cancel_request", "am")
+]))
+async def cancel_manager_request(message: Message, i18n, bot: Bot):
+    from database.crud import cancel_pending_request
+    cancelled = await cancel_pending_request(message.from_user.id)
+    if cancelled:
+        # Notify manager that client cancelled
+        try:
+            await bot.send_message(
+                config.manager_id,
+                f"\u274c \u041a\u043b\u0438\u0435\u043d\u0442 \u043e\u0442\u043c\u0435\u043d\u0438\u043b \u0437\u0430\u043f\u0440\u043e\u0441!\n\n"
+                f"\u0418\u043c\u044f: {message.from_user.full_name}\n"
+                f"Username: @{message.from_user.username or 'N/A'}\n"
+                f"ID: {message.from_user.id}",
+                parse_mode=None
+            )
+        except Exception as e:
+            logging.error(f"Failed to notify manager about cancellation: {e}")
+        await message.answer(
+            i18n("request_cancelled"),
+            reply_markup=get_main_menu_kb(i18n),
+            parse_mode=None
+        )
+    else:
+        await message.answer(
+            i18n("cancel_no_request"),
+            reply_markup=get_main_menu_kb(i18n),
+            parse_mode=None
+        )
+
+
+# ============================================================
 # BACK TO MENU button
 # ============================================================
 
@@ -206,7 +243,16 @@ async def contact_manager(message: Message, i18n, bot: Bot):
     
     await notify_manager_about_attempt(bot, message.from_user, message.text)
 
+    # Show waiting keyboard with "Cancel request" button
     if config.work_start_hour <= current_hour < config.work_end_hour:
-        await message.answer(i18n("wait_for_manager_msg"), parse_mode=None)
+        await message.answer(
+            i18n("wait_for_manager_msg"),
+            reply_markup=get_waiting_for_manager_kb(i18n),
+            parse_mode=None
+        )
     else:
-        await message.answer(i18n("off_duty_msg"), parse_mode=None)
+        await message.answer(
+            i18n("off_duty_msg"),
+            reply_markup=get_waiting_for_manager_kb(i18n),
+            parse_mode=None
+        )
