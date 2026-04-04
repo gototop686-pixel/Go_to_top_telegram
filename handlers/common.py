@@ -100,17 +100,31 @@ async def show_about_us(message: Message, i18n):
     import html as html_lib
 
     about_text = html_lib.escape(i18n("about_us_msg"))
-    links = i18n("about_us_links")  # Already HTML, don't escape
+    links = i18n("about_us_links")  # Already HTML (social links), don't escape
+    site_link = i18n("about_us_site_link")  # Clickable site link (HTML), don't escape
 
     # Logo URL (public GitHub raw link)
     logo_url = "https://raw.githubusercontent.com/gototop686-pixel/Go_to_top_telegram/main/assets/logo.jpg"
 
+    # Insert site link into the text at the right place:
+    # After the line about site info (🌐 ...) and before the payment block (━━━...💳)
+    # The escaped text has "🌐 ... по ссылке:" or "🌐 ... համար՝" on one line,
+    # followed by the separator. We insert the clickable link between them.
+    if site_link and site_link != "about_us_site_link":
+        # Find the 🌐 line and insert site_link right after it
+        marker = html_lib.escape("🌐")
+        lines = about_text.split("\n")
+        new_lines = []
+        for line in lines:
+            new_lines.append(line)
+            if marker in line:
+                new_lines.append(site_link)  # Raw HTML — not escaped
+        about_text = "\n".join(new_lines)
+
     # Build message: invisible link for logo preview + text + social links
-    # The invisible zero-width space link makes Telegram show the image as a large preview
+    full_text = f'<a href="{logo_url}">\u200b</a>{about_text}'
     if links and links != "about_us_links":
-        full_text = f'<a href="{logo_url}">\u200b</a>{about_text}\n\n📱 {links}'
-    else:
-        full_text = f'<a href="{logo_url}">\u200b</a>{about_text}'
+        full_text += f'\n\n📱 {links}'
 
     try:
         # Send as ONE text message with link preview showing the logo
@@ -127,8 +141,7 @@ async def show_about_us(message: Message, i18n):
     except Exception as e:
         logging.error(f"Failed to send about us with link preview: {e}")
         # Fallback: plain text without logo
-        fallback = f"{about_text}\n\n📱 {links}" if links and links != "about_us_links" else about_text
-        await message.answer(fallback, reply_markup=get_main_menu_kb(i18n), parse_mode="HTML")
+        await message.answer(full_text, reply_markup=get_main_menu_kb(i18n), parse_mode="HTML")
 
 
 # ============================================================

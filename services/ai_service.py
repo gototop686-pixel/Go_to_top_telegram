@@ -161,6 +161,32 @@ def parse_lead_ready(response: str):
     return response, None
 
 
+# CJK character ranges to filter out (Chinese, Japanese, Korean)
+_CJK_PATTERN = re.compile(
+    '['
+    '\u2E80-\u2EFF'   # CJK Radicals Supplement
+    '\u3000-\u303F'   # CJK Symbols and Punctuation
+    '\u3040-\u309F'   # Hiragana
+    '\u30A0-\u30FF'   # Katakana
+    '\u3100-\u312F'   # Bopomofo
+    '\u3130-\u318F'   # Hangul Compatibility Jamo
+    '\u3200-\u32FF'   # Enclosed CJK Letters
+    '\u3400-\u4DBF'   # CJK Unified Ext A
+    '\u4E00-\u9FFF'   # CJK Unified Ideographs
+    '\uF900-\uFAFF'   # CJK Compatibility Ideographs
+    '\uFE30-\uFE4F'   # CJK Compatibility Forms
+    '\U00020000-\U0002A6DF'  # CJK Unified Ext B
+    '\U0002A700-\U0002B73F'  # CJK Unified Ext C
+    '\U0002B740-\U0002B81F'  # CJK Unified Ext D
+    ']+'
+)
+
+
+def strip_cjk(text: str) -> str:
+    """Remove any CJK (Chinese/Japanese/Korean) characters from text."""
+    return _CJK_PATTERN.sub('', text)
+
+
 # ============================================================
 # AI SERVICE
 # ============================================================
@@ -267,6 +293,7 @@ class AIService:
 
                     if response and response.choices:
                         answer = response.choices[0].message.content
+                        answer = strip_cjk(answer)  # Remove any CJK characters
                         clean_answer, lead_data = parse_lead_ready(answer)
                         self.conversation.add_assistant_message(user_id, clean_answer)
 
