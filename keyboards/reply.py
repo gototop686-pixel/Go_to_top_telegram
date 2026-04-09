@@ -73,13 +73,15 @@ def get_faq_kb(i18n: Callable) -> ReplyKeyboardMarkup:
 
 
 def get_price_categories_kb(i18n: Callable) -> ReplyKeyboardMarkup:
-    """Pricing sub-menu: 5 categories + back button."""
+    """Pricing sub-menu: 7 categories + back button."""
     kb = [
+        [KeyboardButton(text=i18n("btn_price_packages"))],
         [KeyboardButton(text=i18n("btn_price_main"))],
         [KeyboardButton(text=i18n("btn_price_reviews"))],
         [KeyboardButton(text=i18n("btn_price_photo_video"))],
         [KeyboardButton(text=i18n("btn_price_fulfillment"))],
         [KeyboardButton(text=i18n("btn_price_delivery"))],
+        [KeyboardButton(text=i18n("btn_price_seo"))],
         [KeyboardButton(text=i18n("btn_back_to_menu"))],
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
