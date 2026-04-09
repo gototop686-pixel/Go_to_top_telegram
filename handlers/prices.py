@@ -65,7 +65,7 @@ async def show_delivery_prices(message: Message, i18n):
     i18n_manager.get("btn_price_packages", "am")
 ]))
 async def show_packages(message: Message, i18n):
-    await message.answer(i18n("price_packages_msg"), parse_mode=None)
+    await message.answer(i18n("price_packages_msg"), parse_mode="HTML")
 
 @router.message(F.text.in_([
     i18n_manager.get("btn_price_seo", "ru"),
